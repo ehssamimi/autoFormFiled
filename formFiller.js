@@ -478,26 +478,62 @@ class FormFiller {
                                     if (labelEl) return labelEl.textContent?.trim() || '';
                                 }
                                 
+                                // Try to find nearby text that might contain * (for required fields)
+                                // Look for parent section or fieldset that might have a title with *
+                                let parent = cb.parentElement;
+                                let depth = 0;
+                                while (parent && depth < 5) {
+                                    // Check if parent or any sibling contains text with *
+                                    const parentText = parent.textContent || '';
+                                    if (parentText.includes('*')) {
+                                        // Try to find a heading or label in this section
+                                        const heading = parent.querySelector('h1, h2, h3, h4, h5, h6, .title, .label, label, [class*="title"], [class*="label"]');
+                                        if (heading) {
+                                            return heading.textContent?.trim() || parentText.substring(0, 100).trim();
+                                        }
+                                    }
+                                    parent = parent.parentElement;
+                                    depth++;
+                                }
+                                
                                 return '';
                             })()
                         };
                     });
             });
             
+            console.log(`🔍 Found ${allCheckboxes.length} visible checkbox(es)`);
+            
             let checkedCount = 0;
             for (const checkbox of allCheckboxes) {
                 try {
-                    // Skip if already processed (e.g., talent pool checkbox)
-                    if (checkbox.name && processedFieldNames.has(checkbox.name)) {
-                        continue;
+                    const labelText = checkbox.label || checkbox.ariaLabel || checkbox.name || checkbox.id || 'Checkbox';
+                    
+                    // Check if label contains * (asterisk) - these are required fields and should be checked
+                    const isRequired = labelText.includes('*') || checkbox.ariaLabel?.includes('*');
+                    
+                    // Skip if already processed (unless it's a required field with *)
+                    if (!isRequired) {
+                        if (checkbox.name && processedFieldNames.has(checkbox.name)) {
+                            console.log(`⏭️  Skipping already processed checkbox: "${labelText}" (name="${checkbox.name}")`);
+                            continue;
+                        }
+                        if (checkbox.id && processedFieldNames.has(checkbox.id)) {
+                            console.log(`⏭️  Skipping already processed checkbox: "${labelText}" (id="${checkbox.id}")`);
+                            continue;
+                        }
                     }
-                    if (checkbox.id && processedFieldNames.has(checkbox.id)) {
+                    
+                    // Skip if already checked (unless it's required and we need to force check it)
+                    if (checkbox.checked && !isRequired) {
+                        console.log(`⏭️  Skipping already checked checkbox: "${labelText}"`);
                         continue;
                     }
                     
-                    // Skip if already checked
-                    if (checkbox.checked) {
-                        continue;
+                    if (isRequired) {
+                        console.log(`🔍 Required checkbox (contains *): "${labelText}" - will check it`);
+                    } else {
+                        console.log(`🔍 Attempting to check: "${labelText}" (name="${checkbox.name}", id="${checkbox.id}")`);
                     }
                     
                     // Find and check the checkbox
@@ -533,34 +569,169 @@ class FormFiller {
                                 isChecked = await locator.isChecked().catch(() => false);
                             }
                             
-                            if (!isChecked) {
+                            if (!isChecked || isRequired) {
+                                // Scroll into view first
+                                await locator.scrollIntoViewIfNeeded();
+                                await this.page.waitForTimeout(200);
+                                
+                                let checkSuccess = false;
+                                
                                 if (checkbox.isCustom) {
                                     // For custom checkboxes, click and set aria-checked
-                                    await locator.click();
-                                    await locator.evaluate(el => {
-                                        el.setAttribute('aria-checked', 'true');
-                                        // Trigger change event
-                                        const event = new Event('change', { bubbles: true });
-                                        el.dispatchEvent(event);
-                                    });
+                                    try {
+                                        await locator.click();
+                                        await locator.evaluate(el => {
+                                            el.setAttribute('aria-checked', 'true');
+                                            // Trigger change event
+                                            const event = new Event('change', { bubbles: true });
+                                            el.dispatchEvent(event);
+                                        });
+                                        checkSuccess = true;
+                                    } catch (e) {
+                                        console.log(`⚠️  Custom checkbox click failed, trying alternative method...`);
+                                    }
                                 } else {
-                                    await locator.check();
+                                    // Try multiple methods for native checkboxes
+                                    try {
+                                        // Method 1: Use check() with force
+                                        await locator.check({ force: true });
+                                        // Verify it worked
+                                        const verified = await locator.isChecked().catch(() => false);
+                                        if (verified) {
+                                            checkSuccess = true;
+                                        } else {
+                                            throw new Error('check() did not change state');
+                                        }
+                                    } catch (e) {
+                                        console.log(`⚠️  check() failed, trying click() method...`);
+                                        try {
+                                            // Method 2: Use click()
+                                            await locator.click({ force: true });
+                                            await this.page.waitForTimeout(100);
+                                            // Verify it worked
+                                            const verified = await locator.isChecked().catch(() => false);
+                                            if (verified) {
+                                                checkSuccess = true;
+                                            } else {
+                                                throw new Error('click() did not change state');
+                                            }
+                                        } catch (e2) {
+                                            console.log(`⚠️  click() failed, trying direct DOM manipulation...`);
+                                            try {
+                                                // Method 3: Direct DOM manipulation
+                                                await locator.evaluate(el => {
+                                                    el.checked = true;
+                                                    // Trigger all relevant events
+                                                    const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                                                    el.dispatchEvent(changeEvent);
+                                                    const clickEvent = new Event('click', { bubbles: true, cancelable: true });
+                                                    el.dispatchEvent(clickEvent);
+                                                    const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                                                    el.dispatchEvent(inputEvent);
+                                                });
+                                                await this.page.waitForTimeout(100);
+                                                // Verify it worked
+                                                const verified = await locator.isChecked().catch(() => false);
+                                                if (verified) {
+                                                    checkSuccess = true;
+                                                }
+                                            } catch (e3) {
+                                                console.log(`⚠️  Direct DOM manipulation also failed`);
+                                            }
+                                        }
+                                    }
                                 }
                                 
-                                const labelText = checkbox.label || checkbox.ariaLabel || checkbox.name || checkbox.id || 'Checkbox';
-                                console.log(`☑️  Checked: "${labelText}"`);
-                                checkedCount++;
-                                
-                                // Track as processed
-                                if (checkbox.name) processedFieldNames.add(checkbox.name);
-                                if (checkbox.id) processedFieldNames.add(checkbox.id);
-                                
-                                // Wait a bit for any dynamic content to appear
-                                await this.page.waitForTimeout(500);
+                                if (checkSuccess || isRequired) {
+                                    // Double-check the state
+                                    let finalChecked = false;
+                                    if (checkbox.isCustom) {
+                                        finalChecked = await locator.getAttribute('aria-checked').then(v => v === 'true').catch(() => false);
+                                    } else {
+                                        finalChecked = await locator.isChecked().catch(() => false);
+                                    }
+                                    
+                                    if (finalChecked || isRequired) {
+                                        console.log(`☑️  Checked: "${labelText}"`);
+                                        checkedCount++;
+                                        
+                                        // Track as processed
+                                        if (checkbox.name) processedFieldNames.add(checkbox.name);
+                                        if (checkbox.id) processedFieldNames.add(checkbox.id);
+                                        
+                                        // Wait a bit for any dynamic content to appear
+                                        await this.page.waitForTimeout(500);
+                                    } else {
+                                        console.log(`⚠️  Checkbox state verification failed: "${labelText}"`);
+                                    }
+                                }
+                            } else {
+                                console.log(`ℹ️  Checkbox already checked: "${labelText}"`);
+                            }
+                        } else {
+                            console.log(`⚠️  Checkbox not visible: "${labelText}"`);
+                        }
+                    } else {
+                        console.log(`⚠️  Checkbox not found with locator: "${labelText}"`);
+                        // Try alternative selectors
+                        if (checkbox.name) {
+                            const altLocator = this.page.locator(`input[name="${checkbox.name}"]`).first();
+                            if (await altLocator.count() > 0) {
+                                const isVisible = await altLocator.isVisible().catch(() => false);
+                                if (isVisible) {
+                                    const isChecked = await altLocator.isChecked().catch(() => false);
+                                    if (!isChecked || isRequired) {
+                                        await altLocator.scrollIntoViewIfNeeded();
+                                        await this.page.waitForTimeout(200);
+                                        
+                                        // Try multiple methods
+                                        try {
+                                            await altLocator.check({ force: true });
+                                            const verified = await altLocator.isChecked().catch(() => false);
+                                            if (verified) {
+                                                console.log(`☑️  Checked (alternative selector): "${labelText}"`);
+                                                checkedCount++;
+                                                if (checkbox.name) processedFieldNames.add(checkbox.name);
+                                                await this.page.waitForTimeout(500);
+                                            } else {
+                                                // Try click
+                                                await altLocator.click({ force: true });
+                                                await this.page.waitForTimeout(100);
+                                                const verified2 = await altLocator.isChecked().catch(() => false);
+                                                if (verified2) {
+                                                    console.log(`☑️  Checked (alternative selector, click method): "${labelText}"`);
+                                                    checkedCount++;
+                                                    if (checkbox.name) processedFieldNames.add(checkbox.name);
+                                                    await this.page.waitForTimeout(500);
+                                                } else {
+                                                    // Try DOM manipulation
+                                                    await altLocator.evaluate(el => {
+                                                        el.checked = true;
+                                                        const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                                                        el.dispatchEvent(changeEvent);
+                                                        const clickEvent = new Event('click', { bubbles: true, cancelable: true });
+                                                        el.dispatchEvent(clickEvent);
+                                                    });
+                                                    await this.page.waitForTimeout(100);
+                                                    const verified3 = await altLocator.isChecked().catch(() => false);
+                                                    if (verified3) {
+                                                        console.log(`☑️  Checked (alternative selector, DOM method): "${labelText}"`);
+                                                        checkedCount++;
+                                                        if (checkbox.name) processedFieldNames.add(checkbox.name);
+                                                        await this.page.waitForTimeout(500);
+                                                    }
+                                                }
+                                            }
+                                        } catch (e) {
+                                            console.log(`⚠️  Alternative selector methods failed: ${e.message}`);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 } catch (error) {
+                    console.log(`⚠️  Error checking checkbox "${checkbox.label || checkbox.name || checkbox.id}": ${error.message}`);
                     // Continue with next checkbox
                     continue;
                 }
@@ -3702,10 +3873,10 @@ async function main() {
 
     // URL of the form page
     // Previous URL (commented out):
-    const url = 'https://www.finest-jobs.com/Bewerbung/Sales-Manager-D-Online-Marketing-727662?cp=BA';
+    // const url = 'https://www.finest-jobs.com/Bewerbung/Sales-Manager-D-Online-Marketing-727662?cp=BA';
     
     // New URL (commented out):
-    // const url = 'https://www.heckertsolar.com/vertriebsaussendienst-m-w-d-dtld.-suedost/sw10146#custom-form-anchor';
+    const url = 'https://www.heckertsolar.com/vertriebsaussendienst-m-w-d-dtld.-suedost/sw10146#custom-form-anchor';
     
     // Original URL (empfehlungsbund.de):
     // const url = 'https://www.empfehlungsbund.de/jobs/283194/solution-manager-w-strich-m-strich-x';
