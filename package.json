@@ -1,0 +1,24 @@
+{
+  "name": "form-complete",
+  "version": "1.0.0",
+  "description": "Automated web form filler using Playwright",
+  "main": "formFiller.js",
+  "type": "module",
+  "scripts": {
+    "start": "node formFiller.js",
+    "install-browsers": "playwright install chromium"
+  },
+  "keywords": [
+    "automation",
+    "form",
+    "playwright",
+    "web-scraping"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "dotenv": "^16.3.1"
+  }
+}
+
