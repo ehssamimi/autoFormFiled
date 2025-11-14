@@ -3876,7 +3876,8 @@ async function main() {
     // const url = 'https://www.finest-jobs.com/Bewerbung/Sales-Manager-D-Online-Marketing-727662?cp=BA';
     
     // New URL (commented out):
-    const url = 'https://www.heckertsolar.com/vertriebsaussendienst-m-w-d-dtld.-suedost/sw10146#custom-form-anchor';
+    // const url = 'https://www.heckertsolar.com/vertriebsaussendienst-m-w-d-dtld.-suedost/sw10146#custom-form-anchor';
+    const url = 'https://www.empfehlungsbund.de/jobs/283194/solution-manager-w-strich-m-strich-x';
     
     // Original URL (empfehlungsbund.de):
     // const url = 'https://www.empfehlungsbund.de/jobs/283194/solution-manager-w-strich-m-strich-x';

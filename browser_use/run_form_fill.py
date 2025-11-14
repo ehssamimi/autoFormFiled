@@ -15,7 +15,7 @@ from modules.form_filler import FormFiller
 
 async def main():
     """Main function"""
-    url = 'https://www.finest-jobs.com/Bewerbung/Sales-Manager-D-Online-Marketing-727662?cp=BA'
+    url = 'https://www.empfehlungsbund.de/jobs/283194/solution-manager-w-strich-m-strich-x'
     config_path = 'config.json'
     
     print(f"Starting form filling for: {url}\n")
