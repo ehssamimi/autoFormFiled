@@ -3,6 +3,7 @@ Field Detector Module
 Detects the type of form field automatically
 """
 
+import re
 from typing import Optional, Dict, Any
 
 
@@ -30,6 +31,15 @@ class FieldDetector:
             # Check for textarea
             if tag_name == 'textarea':
                 return 'textarea'
+            
+            # Check for dropzone (div with dropzone class)
+            if tag_name == 'div':
+                class_name = await locator.get_attribute('class')
+                element_id = await locator.get_attribute('id')
+                if class_name and ('dropzone' in class_name.lower() or 'drop-zone' in class_name.lower()):
+                    return 'file'
+                if element_id and ('dropzone' in element_id.lower() or 'drop-zone' in element_id.lower()):
+                    return 'file'
             
             # Check input types
             if tag_name == 'input':
@@ -65,7 +75,26 @@ class FieldDetector:
                 class_name = await locator.get_attribute('class')
                 content_editable = await locator.get_attribute('contenteditable')
                 data_field_type = await locator.get_attribute('data-field-type')
+                data_placeholder = await locator.get_attribute('data-placeholder')
                 aria_autocomplete = await locator.get_attribute('aria-autocomplete')
+                
+                # Check for custom select box: input text with data-placeholder and hidden select nearby
+                if input_type == 'text' and data_placeholder:
+                    # Check if there's a hidden select element in the same container
+                    has_hidden_select = await locator.evaluate("""
+                        (input) => {
+                            const container = input.closest('div');
+                            if (container) {
+                                const select = container.querySelector('select.form--hidden, select[class*="hidden"], select[style*="display: none"], select[style*="display:none"]');
+                                if (select) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                    """)
+                    if has_hidden_select:
+                        return 'select'
                 
                 # Check data-field-type attribute
                 if data_field_type:
@@ -85,7 +114,43 @@ class FieldDetector:
                 if content_editable == 'true' or (class_name and ('ql-editor' in class_name or 'mce-content-body' in class_name)):
                     return 'richtext'
                 
-                # Check for autocomplete/typeahead
+                # Check for combobox with hidden select or bw-popover (should be treated as select, not autocomplete)
+                if role == 'combobox':
+                    # Check if there's a hidden select element nearby (this is a custom select, not autocomplete)
+                    has_hidden_select = await locator.evaluate("""
+                        (button) => {
+                            const container = button.closest('div');
+                            if (container) {
+                                const select = container.querySelector('select[aria-hidden="true"], select[style*="position: absolute"], select[style*="position:absolute"], select[style*="clip: rect"]');
+                                if (select) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                    """)
+                    if has_hidden_select:
+                        return 'select'  # This is a custom select combobox, not autocomplete
+                    
+                    # Check for bw-popover/bw-select-menu (custom select implementation)
+                    has_bw_select = await locator.evaluate("""
+                        (button) => {
+                            // Check if there's a bw-popover or bw-select-menu in the document
+                            const popover = document.querySelector('bw-popover, bw-select-menu');
+                            if (popover) {
+                                return true;
+                            }
+                            // Also check if button has data attributes that suggest it opens a popover
+                            if (button.getAttribute('aria-controls') || button.getAttribute('aria-haspopup')) {
+                                return true;
+                            }
+                            return false;
+                        }
+                    """)
+                    if has_bw_select:
+                        return 'select'  # This is a custom select with popover, not autocomplete
+                
+                # Check for autocomplete/typeahead (only if not a select)
                 if role in ['combobox', 'searchbox'] or \
                    aria_autocomplete in ['list', 'both'] or \
                    (class_name and ('autocomplete' in class_name or 'typeahead' in class_name or 'selectize' in class_name)):
@@ -189,27 +254,92 @@ class FieldDetector:
             # Priority 3: label[for]
             field_id = await locator.get_attribute('id')
             if field_id:
+                # Try label[for] first
                 label = locator.page.locator(f'label[for="{field_id}"]').first
                 if await label.count() > 0:
                     label_text = await label.text_content()
                     if label_text:
                         return label_text.strip()
+                
+                # Try label with id pattern (e.g., input id="2" -> label id="2-label")
+                label_patterns = [
+                    f'label#{field_id}-label',
+                    f'label[id="{field_id}-label"]',
+                    f'label[id*="{field_id}"]'
+                ]
+                for pattern in label_patterns:
+                    try:
+                        label = locator.page.locator(pattern).first
+                        if await label.count() > 0:
+                            label_text = await label.text_content()
+                            if label_text:
+                                return label_text.strip()
+                    except Exception:
+                        continue
             
-            # Priority 4: parent label
+            # Priority 4: Find label in parent container
+            try:
+                parent_label = await locator.evaluate("""
+                    (el) => {
+                        // Look for label in parent containers
+                        let current = el.parentElement;
+                        for (let i = 0; i < 5 && current; i++) {
+                            // Check if current has a label child
+                            const label = current.querySelector('label');
+                            if (label && label.textContent) {
+                                return label.textContent.trim();
+                            }
+                            // Check if current is a label
+                            if (current.tagName === 'LABEL' && current.textContent) {
+                                return current.textContent.trim();
+                            }
+                            current = current.parentElement;
+                        }
+                        return null;
+                    }
+                """)
+                if parent_label:
+                    return parent_label
+            except Exception:
+                pass
+            
+            # Priority 5: parent label (xpath)
             parent_label = locator.locator('xpath=ancestor::label').first
             if await parent_label.count() > 0:
                 label_text = await parent_label.text_content()
                 if label_text:
                     return label_text.strip()
             
-            # Priority 5: preceding sibling label
+            # Priority 6: preceding sibling label
             preceding_label = locator.locator('xpath=preceding-sibling::label[1]').first
             if await preceding_label.count() > 0:
                 label_text = await preceding_label.text_content()
                 if label_text:
                     return label_text.strip()
             
-            # Priority 6: placeholder
+            # Priority 7: Find label by name pattern (e.g., input name="item2" -> label id="2-label")
+            field_name = await locator.get_attribute('name')
+            if field_name:
+                # Extract number from name (e.g., "item2" -> "2")
+                match = re.search(r'(\d+)', field_name)
+                if match:
+                    num = match.group(1)
+                    label_patterns = [
+                        f'label#{num}-label',
+                        f'label[id="{num}-label"]',
+                        f'label[id*="{num}"]'
+                    ]
+                    for pattern in label_patterns:
+                        try:
+                            label = locator.page.locator(pattern).first
+                            if await label.count() > 0:
+                                label_text = await label.text_content()
+                                if label_text:
+                                    return label_text.strip()
+                        except Exception:
+                            continue
+            
+            # Priority 8: placeholder (only if no label found)
             placeholder = await locator.get_attribute('placeholder')
             if placeholder:
                 return placeholder

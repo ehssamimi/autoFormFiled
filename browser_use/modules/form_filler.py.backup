@@ -60,17 +60,14 @@ class FormFiller:
             return None
         
         try:
-            print('[INFO] Checking for cookie consent popup...')
             # Quick check: wait for cookie wrapper with short timeout
             try:
                 await self.page.wait_for_selector(
                     '[id*="cookie"], [class*="cookie"], [id*="consent"], [class*="consent"], [id*="gdpr"], [class*="gdpr"]',
                     timeout=1500
                 )
-                print('[INFO] Cookie consent popup found, looking for accept button...')
             except Exception:
                 # No cookie wrapper found - cookie doesn't exist
-                print('[INFO] No cookie consent popup found on this page')
                 return None
             
             # Cookie wrapper exists, check for buttons
@@ -139,29 +136,6 @@ class FormFiller:
             return []
         
         try:
-            # First, scroll through the page to ensure all fields are loaded
-            print(f'   [FIELD_SCAN] Scrolling through page to load all fields...')
-            try:
-                # Scroll to top first
-                await self.page.evaluate("window.scrollTo(0, 0)")
-                await self.page.wait_for_timeout(500)
-                
-                # Scroll through the page in steps
-                page_height = await self.page.evaluate("document.body.scrollHeight")
-                viewport_height = await self.page.evaluate("window.innerHeight")
-                scroll_steps = max(3, int(page_height / viewport_height) + 1)
-                
-                for step in range(scroll_steps + 1):
-                    scroll_position = int((step / scroll_steps) * page_height) if scroll_steps > 0 else 0
-                    await self.page.evaluate(f"window.scrollTo(0, {scroll_position})")
-                    await self.page.wait_for_timeout(300)  # Wait for lazy-loaded content
-                
-                # Scroll back to top
-                await self.page.evaluate("window.scrollTo(0, 0)")
-                await self.page.wait_for_timeout(500)
-            except Exception as e:
-                print(f'   [WARNING] Error during scroll: {str(e)}')
-            
             # Get all form elements
             fields = await self.page.evaluate("""
                 () => {
@@ -207,64 +181,6 @@ class FormFiller:
                                 });
                             }
                         });
-                    });
-                    
-                    // IMPORTANT: Find Dropzone elements (popular file upload library)
-                    // Pattern: div.dropzone or div[class*="dropzone"] with id or data-category
-                    document.querySelectorAll('.dropzone, [class*="dropzone"], [class*="drop-zone"], [id*="dropzone"], [id*="drop-zone"]').forEach(dropzone => {
-                        const style = window.getComputedStyle(dropzone);
-                        const isVisible = (
-                            style.display !== 'none' &&
-                            style.visibility !== 'hidden' &&
-                            style.opacity !== '0' &&
-                            dropzone.offsetWidth > 0 &&
-                            dropzone.offsetHeight > 0
-                        );
-                        
-                        if (isVisible) {
-                            // Get dropzone id and data-category
-                            const dropzoneId = dropzone.id || '';
-                            const dataCategory = dropzone.getAttribute('data-category') || '';
-                            
-                            // Try to find associated label
-                            let label = null;
-                            if (dropzoneId) {
-                                label = document.querySelector(`label[for="${dropzoneId}"]`);
-                            }
-                            
-                            // Get position from dropzone or label
-                            let rect = dropzone.getBoundingClientRect();
-                            if (label) {
-                                rect = label.getBoundingClientRect();
-                            }
-                            
-                            // Check if we already added this dropzone
-                            const alreadyAdded = allFields.some(f => 
-                                (f.id === dropzoneId && dropzoneId) ||
-                                (f.name === dataCategory && dataCategory) ||
-                                (f.type === 'file' && f.dropzoneId === dropzoneId)
-                            );
-                            
-                            if (!alreadyAdded) {
-                                // Find file input inside dropzone (if exists)
-                                const fileInput = dropzone.querySelector('input[type="file"]');
-                                const fileInputName = fileInput ? (fileInput.name || '') : '';
-                                const fileInputId = fileInput ? (fileInput.id || '') : '';
-                                
-                                allFields.push({
-                                    name: fileInputName || dataCategory || dropzoneId,
-                                    id: fileInputId || dropzoneId,
-                                    type: 'file',
-                                    x: rect.left,
-                                    y: rect.top,
-                                    selector: dropzoneId ? `#${dropzoneId}` : '.dropzone',
-                                    isDropzone: true,
-                                    dropzoneId: dropzoneId,
-                                    dataCategory: dataCategory
-                                });
-                                console.log('Found dropzone:', dropzoneId, dataCategory, 'with file input:', fileInputName, fileInputId);
-                            }
-                        }
                     });
                     
                     // IMPORTANT: Also find file inputs even if they're hidden
@@ -316,101 +232,6 @@ class FormFiller:
                                 y: rect.top,
                                 selector: 'input[type="file"]'
                             });
-                        }
-                    });
-                    
-                    // IMPORTANT: Find custom select boxes (input text with data-placeholder and hidden select)
-                    // These are custom select implementations where input text is visible but select is hidden
-                    document.querySelectorAll('input[type="text"][data-placeholder]').forEach(input => {
-                        const style = window.getComputedStyle(input);
-                        const isVisible = (
-                            style.display !== 'none' &&
-                            style.visibility !== 'hidden' &&
-                            style.opacity !== '0' &&
-                            input.offsetWidth > 0 &&
-                            input.offsetHeight > 0 &&
-                            !input.disabled &&
-                            !input.readOnly
-                        );
-                        
-                        if (isVisible) {
-                            // Find hidden select in the same container
-                            const container = input.closest('div');
-                            if (container) {
-                                const hiddenSelect = container.querySelector('select.form--hidden, select[class*="hidden"], select[style*="display: none"], select[style*="display:none"], select[class*="form--hidden"]');
-                                if (hiddenSelect) {
-                                    // Check if we already added this select
-                                    const selectName = hiddenSelect.name || '';
-                                    const selectId = hiddenSelect.id || '';
-                                    const alreadyAdded = allFields.some(f => 
-                                        (f.name === selectName && selectName) || 
-                                        (f.id === selectId && selectId)
-                                    );
-                                    
-                                    if (!alreadyAdded) {
-                                        const rect = input.getBoundingClientRect();
-                                        allFields.push({
-                                            name: selectName,
-                                            id: selectId,
-                                            type: 'select',
-                                            x: rect.left,
-                                            y: rect.top,
-                                            selector: 'input[type="text"][data-placeholder]',
-                                            isCustomSelect: true,
-                                            inputId: input.id || '',
-                                            inputName: input.name || ''
-                                        });
-                                        console.log('Found custom select:', selectName, selectId, 'with input:', input.id, input.name);
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    
-                    // Also find all hidden selects that might be custom select boxes
-                    // Look for selects with form--hidden class or similar
-                    document.querySelectorAll('select.form--hidden, select[class*="hidden"][class*="select"], select[class*="cxsSelectField"]').forEach(select => {
-                        const selectName = select.name || '';
-                        const selectId = select.id || '';
-                        
-                        // Check if we already added this select
-                        const alreadyAdded = allFields.some(f => 
-                            (f.name === selectName && selectName) || 
-                            (f.id === selectId && selectId)
-                        );
-                        
-                        if (!alreadyAdded) {
-                            // Try to find associated input text or container
-                            const container = select.closest('div');
-                            if (container) {
-                                const inputText = container.querySelector('input[type="text"][data-placeholder]');
-                                if (inputText) {
-                                    const style = window.getComputedStyle(inputText);
-                                    const isVisible = (
-                                        style.display !== 'none' &&
-                                        style.visibility !== 'hidden' &&
-                                        style.opacity !== '0' &&
-                                        inputText.offsetWidth > 0 &&
-                                        inputText.offsetHeight > 0
-                                    );
-                                    
-                                    if (isVisible) {
-                                        const rect = inputText.getBoundingClientRect();
-                                        allFields.push({
-                                            name: selectName,
-                                            id: selectId,
-                                            type: 'select',
-                                            x: rect.left,
-                                            y: rect.top,
-                                            selector: 'select[hidden]',
-                                            isCustomSelect: true,
-                                            inputId: inputText.id || '',
-                                            inputName: inputText.name || ''
-                                        });
-                                        console.log('Found hidden select with input:', selectName, selectId);
-                                    }
-                                }
-                            }
                         }
                     });
                     
@@ -482,18 +303,6 @@ class FormFiller:
                 # For file inputs, always include them even if they appear hidden
                 # (they're often hidden and shown via button/label)
                 if field_type == 'file':
-                    # Check if this is a dropzone
-                    if field.get('isDropzone'):
-                        print(f'   [FIELD_DETECTION] Dropzone detected: id="{field.get("id")}", dropzoneId="{field.get("dropzoneId")}", dataCategory="{field.get("dataCategory")}"')
-                        # For dropzone, try to find by dropzone id first
-                        if field.get('dropzoneId'):
-                            selectors_to_try.append(f'#{field["dropzoneId"]}')
-                        if field.get('id'):
-                            selectors_to_try.append(f'#{field["id"]}')
-                        # Also try generic dropzone selector
-                        selectors_to_try.append('.dropzone')
-                    
-                    # Regular file input selectors
                     if field.get('id'):
                         selectors_to_try.append(f'input[type="file"]#{field["id"]}')
                     if field.get('name'):
@@ -504,18 +313,6 @@ class FormFiller:
                 
                 # For select fields, prioritize select element over hidden input
                 elif field_type == 'select':
-                    # Check if this is a custom select (input text with hidden select)
-                    if field.get('isCustomSelect'):
-                        print(f'   [FIELD_DETECTION] Custom select detected: name="{field.get("name")}", id="{field.get("id")}"')
-                        # For custom select, try to find the visible input text first
-                        if field.get('inputId'):
-                            selectors_to_try.append(f'input#{field["inputId"]}')
-                        if field.get('inputName'):
-                            selectors_to_try.append(f'input[name="{field["inputName"]}"]')
-                        # Also try to find by data-placeholder
-                        selectors_to_try.append('input[type="text"][data-placeholder]')
-                    
-                    # Always try to find the hidden select element
                     if field.get('id'):
                         selectors_to_try.append(f'select#{field["id"]}')
                     if field.get('name'):
@@ -536,58 +333,6 @@ class FormFiller:
                 found = False
                 for selector in selectors_to_try:
                     try:
-                        # For dropzone, handle div selector specially
-                        if field.get('isDropzone') and (selector.startswith('#') or selector.startswith('.dropzone')):
-                            # Try to find dropzone div
-                            dropzone_locator = self.page.locator(selector).first
-                            dropzone_count = await dropzone_locator.count()
-                            if dropzone_count > 0:
-                                # Check if it has dropzone class
-                                has_dropzone_class = await dropzone_locator.evaluate("""
-                                    (div) => {
-                                        return div.classList.contains('dropzone') || 
-                                               div.className.includes('dropzone') ||
-                                               div.className.includes('drop-zone');
-                                    }
-                                """)
-                                if has_dropzone_class:
-                                    # Found the dropzone, use it as locator
-                                    field_locators.append(dropzone_locator)
-                                    if field.get('name'):
-                                        processed_names.add(field['name'])
-                                    if field.get('id'):
-                                        processed_names.add(field['id'])
-                                    if field.get('dropzoneId'):
-                                        processed_names.add(field['dropzoneId'])
-                                    processed_positions.add(pos_key)
-                                    found = True
-                                    print(f'   [FIELD_DETECTION] Found dropzone: {selector}')
-                                    break
-                        
-                        # For custom select, handle input text selector specially
-                        if field.get('isCustomSelect') and selector.startswith('input'):
-                            # Try to find input text first
-                            input_locator = self.page.locator(selector).first
-                            input_count = await input_locator.count()
-                            if input_count > 0:
-                                # Check if it has data-placeholder
-                                has_data_placeholder = await input_locator.evaluate("""
-                                    (input) => {
-                                        return input.hasAttribute('data-placeholder');
-                                    }
-                                """)
-                                if has_data_placeholder:
-                                    # Found the input, use it as locator
-                                    field_locators.append(input_locator)
-                                    if field.get('name'):
-                                        processed_names.add(field['name'])
-                                    if field.get('id'):
-                                        processed_names.add(field['id'])
-                                    processed_positions.add(pos_key)
-                                    found = True
-                                    print(f'   [FIELD_DETECTION] Found custom select input: {selector}')
-                                    break
-                        
                         if selector == 'select_by_position':
                             # For select fallback, find all selects and match by position
                             all_selects = await self.page.locator('select').all()
@@ -649,27 +394,7 @@ class FormFiller:
                         continue
                 
                 # If not found with specific selectors, try generic selector but exclude hidden
-                # First try by id if available
-                if not found and field.get('id') and field_type != 'hidden':
-                    try:
-                        # Try to find by id
-                        id_locator = self.page.locator(f'#{field["id"]}').first
-                        if await id_locator.count() > 0:
-                            is_visible = await id_locator.is_visible()
-                            if is_visible:
-                                field_locators.append(id_locator)
-                                if field.get('name'):
-                                    processed_names.add(field['name'])
-                                if field.get('id'):
-                                    processed_names.add(field['id'])
-                                processed_positions.add(pos_key)
-                                found = True
-                                print(f'   [FIELD_DETECTION] Found field by id: #{field["id"]}')
-                    except Exception:
-                        pass
-                
-                # Then try by name
-                if not found and field.get('name') and field_type != 'hidden':
+                if not found and field['name'] and field_type != 'hidden':
                     try:
                         # Try to find by name but exclude hidden and prefer visible elements
                         all_with_name = await self.page.locator(f'[name="{field["name"]}"]').all()
@@ -692,71 +417,6 @@ class FormFiller:
                                     break
                     except Exception:
                         pass
-                
-                # Last resort: try to find by type and position if we have coordinates
-                if not found and field_type != 'hidden' and field.get('x') is not None and field.get('y') is not None:
-                    try:
-                        # Try to find all elements of this type and match by position
-                        type_selector = field_type
-                        if field_type == 'text' or field_type == 'email' or field_type == 'tel':
-                            type_selector = 'input'
-                        
-                        all_of_type = await self.page.locator(type_selector).all()
-                        for elem in all_of_type:
-                            try:
-                                elem_rect = await elem.bounding_box()
-                                if elem_rect:
-                                    # Check if position is close (within 50px)
-                                    y_diff = abs(elem_rect['y'] - field.get('y', 0))
-                                    x_diff = abs(elem_rect['x'] - field.get('x', 0))
-                                    if y_diff < 50 and x_diff < 50:
-                                        is_visible = await elem.is_visible()
-                                        if is_visible:
-                                            # Double check it's not already added
-                                            elem_id = await elem.get_attribute('id')
-                                            elem_name = await elem.get_attribute('name')
-                                            if (not elem_id or elem_id not in processed_names) and (not elem_name or elem_name not in processed_names):
-                                                field_locators.append(elem)
-                                                if elem_id:
-                                                    processed_names.add(elem_id)
-                                                if elem_name:
-                                                    processed_names.add(elem_name)
-                                                processed_positions.add(pos_key)
-                                                found = True
-                                                print(f'   [FIELD_DETECTION] Found field by position: type="{field_type}", x={field.get("x")}, y={field.get("y")}')
-                                                break
-                            except Exception:
-                                continue
-                    except Exception:
-                        pass
-            
-            # Log how many fields were found vs converted to locators
-            print(f'   [FIELD_SCAN] Found {len(fields)} fields in DOM, converted {len(field_locators)} to locators')
-            if len(fields) > len(field_locators):
-                print(f'   [WARNING] Some fields could not be converted to locators. Missing: {len(fields) - len(field_locators)} fields')
-                # Log which fields were not converted
-                converted_ids = set()
-                converted_names = set()
-                for locator in field_locators:
-                    try:
-                        loc_id = await locator.get_attribute('id')
-                        loc_name = await locator.get_attribute('name')
-                        if loc_id:
-                            converted_ids.add(loc_id)
-                        if loc_name:
-                            converted_names.add(loc_name)
-                    except Exception:
-                        pass
-                
-                missing_fields = []
-                for field in fields:
-                    field_id = field.get('id', '')
-                    field_name = field.get('name', '')
-                    if (not field_id or field_id not in converted_ids) and (not field_name or field_name not in converted_names):
-                        missing_fields.append(f'id="{field_id}", name="{field_name}", type="{field.get("type", "")}"')
-                
-                if missing_fields:
-                    print(f'   [WARNING] Missing fields: {", ".join(missing_fields[:5])}')  # Show first 5
             
             return field_locators
         except Exception as e:
@@ -773,165 +433,6 @@ class FormFiller:
             field_id = await locator.get_attribute('id')
             placeholder = await locator.get_attribute('placeholder')
             label = await FieldDetector.get_label(locator)
-            
-            # For combobox fields (button with role="combobox") and custom select (input text with hidden select)
-            if field_type == 'select':
-                try:
-                    tag_name = await locator.evaluate("el => el.tagName.toLowerCase()")
-                    role = await locator.get_attribute('role')
-                    input_type = await locator.get_attribute('type')
-                    data_placeholder = await locator.get_attribute('data-placeholder')
-                    
-                    print(f'   [GET_FIELD_INFO] Element tag: "{tag_name}", role: "{role}", type: "{input_type}", data-placeholder: "{data_placeholder}"')
-                    
-                    # Check for custom select: input text with data-placeholder and hidden select
-                    if tag_name == 'input' and input_type == 'text' and data_placeholder:
-                        print(f'   [GET_FIELD_INFO] Detected custom select (input text with data-placeholder), finding hidden select...')
-                        try:
-                            # Find hidden select in container
-                            select_info = await self.page.evaluate("""
-                                (input) => {
-                                    const container = input.closest('div');
-                                    if (container) {
-                                        const select = container.querySelector('select.form--hidden, select[class*="hidden"], select[style*="display: none"], select[style*="display:none"]');
-                                        if (select) {
-                                            return {
-                                                name: select.name || '',
-                                                id: select.id || '',
-                                                value: select.value || ''
-                                            };
-                                        }
-                                    }
-                                    return { name: '', id: '', value: '' };
-                                }
-                            """, await locator.element_handle())
-                            
-                            print(f'   [GET_FIELD_INFO] Hidden select found: name="{select_info.get("name")}", id="{select_info.get("id")}", value="{select_info.get("value")}"')
-                            if select_info.get('name'):
-                                name = select_info['name']
-                                print(f'   [GET_FIELD_INFO] Updated name to: "{name}"')
-                            if select_info.get('id'):
-                                field_id = select_info['id']
-                                print(f'   [GET_FIELD_INFO] Updated id to: "{field_id}"')
-                        except Exception as e:
-                            print(f'   [GET_FIELD_INFO] Error finding hidden select: {str(e)}')
-                            pass
-                    
-                    elif tag_name == 'button' and role == 'combobox':
-                        print(f'   [GET_FIELD_INFO] Detected combobox button, finding hidden select or bw-select-menu...')
-                        
-                        # First check if this is a bw-select-menu (bw-popover)
-                        is_bw_select = await self.page.evaluate("""
-                            () => {
-                                return !!document.querySelector('bw-popover, bw-select-menu');
-                            }
-                        """)
-                        
-                        if is_bw_select:
-                            print(f'   [GET_FIELD_INFO] Detected bw-select-menu (bw-popover)')
-                            # For bw-select-menu, try to get name/id from button or nearby elements
-                            try:
-                                # Try to get from button's aria-controls or data attributes
-                                aria_controls = await locator.get_attribute('aria-controls')
-                                button_id = await locator.get_attribute('id')
-                                
-                                # Try to find associated input or hidden field
-                                bw_info = await self.page.evaluate("""
-                                    (button) => {
-                                        // Look for hidden input or select near the button
-                                        const container = button.closest('div, form, fieldset');
-                                        if (container) {
-                                            // Try to find hidden input with similar name pattern
-                                            const hiddenInput = container.querySelector('input[type="hidden"]');
-                                            if (hiddenInput) {
-                                                return {
-                                                    name: hiddenInput.name || '',
-                                                    id: hiddenInput.id || ''
-                                                };
-                                            }
-                                            
-                                            // Try to find select
-                                            const select = container.querySelector('select');
-                                            if (select) {
-                                                return {
-                                                    name: select.name || '',
-                                                    id: select.id || ''
-                                                };
-                                            }
-                                        }
-                                        return { name: '', id: '' };
-                                    }
-                                """, await locator.element_handle())
-                                
-                                if bw_info.get('name'):
-                                    name = bw_info['name']
-                                    print(f'   [GET_FIELD_INFO] Found name from bw-select-menu: "{name}"')
-                                if bw_info.get('id'):
-                                    field_id = bw_info['id']
-                                    print(f'   [GET_FIELD_INFO] Found id from bw-select-menu: "{field_id}"')
-                            except Exception as e:
-                                print(f'   [GET_FIELD_INFO] Error getting bw-select-menu info: {str(e)}')
-                        else:
-                            # Regular combobox with hidden select
-                            # Find the hidden select element and get its name
-                            try:
-                                # Try to find select in parent container
-                                select_name = await self.page.evaluate("""
-                                    (button) => {
-                                        // Find select element in the same container as the button
-                                        const container = button.closest('div');
-                                        if (container) {
-                                            const select = container.querySelector('select');
-                                            if (select) {
-                                                console.log('Found select in container:', select.name, select.id);
-                                                return select.name || '';
-                                            }
-                                        }
-                                        // Fallback: find any select near the button
-                                        const allSelects = document.querySelectorAll('select');
-                                        console.log('Total selects found:', allSelects.length);
-                                        for (const select of allSelects) {
-                                            const selectRect = select.getBoundingClientRect();
-                                            const buttonRect = button.getBoundingClientRect();
-                                            // Check if select is near the button (within 100px)
-                                            if (Math.abs(selectRect.top - buttonRect.top) < 100 &&
-                                                Math.abs(selectRect.left - buttonRect.left) < 100) {
-                                                console.log('Found nearby select:', select.name, select.id);
-                                                return select.name || '';
-                                            }
-                                        }
-                                        return '';
-                                    }
-                                """, await locator.element_handle())
-                                
-                                print(f'   [GET_FIELD_INFO] Select name found: "{select_name}"')
-                                if select_name:
-                                    name = select_name
-                                    print(f'   [GET_FIELD_INFO] Updated name to: "{name}"')
-                                    
-                                # Also try to get select id
-                                select_id = await self.page.evaluate("""
-                                    (button) => {
-                                        const container = button.closest('div');
-                                        if (container) {
-                                            const select = container.querySelector('select');
-                                            if (select) {
-                                                return select.id || '';
-                                            }
-                                        }
-                                        return '';
-                                    }
-                                """, await locator.element_handle())
-                                
-                                print(f'   [GET_FIELD_INFO] Select id found: "{select_id}"')
-                                if select_id:
-                                    field_id = select_id
-                                    print(f'   [GET_FIELD_INFO] Updated id to: "{field_id}"')
-                            except Exception as e:
-                                print(f'   [GET_FIELD_INFO] Error finding select: {str(e)}')
-                                pass
-                except Exception:
-                    pass
             
             # For file inputs, also get display and visibility
             display = None
@@ -979,148 +480,8 @@ class FormFiller:
             
             elif field_type == 'select':
                 try:
-                    # For combobox fields (button with role="combobox") and custom select (input text with hidden select)
-                    tag_name = await locator.evaluate("el => el.tagName.toLowerCase()")
-                    role = await locator.get_attribute('role')
-                    input_type = await locator.get_attribute('type')
-                    data_placeholder = await locator.get_attribute('data-placeholder')
-                    
-                    print(f'   [IS_FIELD_FILLED] Checking select field: tag="{tag_name}", role="{role}", type="{input_type}", data-placeholder="{data_placeholder}"')
-                    
-                    # Check for custom select: input text with data-placeholder and hidden select
-                    if tag_name == 'input' and input_type == 'text' and data_placeholder:
-                        print(f'   [IS_FIELD_FILLED] Detected custom select (input text), checking hidden select...')
-                        try:
-                            # Check if input shows placeholder (empty)
-                            input_value = await locator.input_value()
-                            print(f'   [IS_FIELD_FILLED] Input value: "{input_value}"')
-                            
-                            # Check hidden select value
-                            select_value = await self.page.evaluate("""
-                                (input) => {
-                                    const container = input.closest('div');
-                                    if (container) {
-                                        const select = container.querySelector('select.form--hidden, select[class*="hidden"], select[style*="display: none"], select[style*="display:none"]');
-                                        if (select) {
-                                            return select.value || '';
-                                        }
-                                    }
-                                    return '';
-                                }
-                            """, await locator.element_handle())
-                            
-                            print(f'   [IS_FIELD_FILLED] Hidden select value: "{select_value}"')
-                            
-                            # If select has value and it's not empty placeholder, it's filled
-                            if select_value and select_value.strip() != '' and select_value != '0':
-                                print(f'   [IS_FIELD_FILLED] Custom select is FILLED with value: "{select_value}"')
-                                return True
-                            else:
-                                print(f'   [IS_FIELD_FILLED] Custom select is EMPTY')
-                                return False
-                        except Exception as e:
-                            print(f'   [IS_FIELD_FILLED] Error checking custom select: {str(e)}')
-                            return False
-                    
-                    # If this is a combobox button, find the hidden select element
-                    elif tag_name == 'button' and role == 'combobox':
-                        print(f'   [COMBOBOX] Detected combobox button, checking if filled...')
-                        # First check: if button shows placeholder text, it's definitely not filled
-                        try:
-                            button_text = await locator.evaluate("""
-                                (button) => {
-                                    const span = button.querySelector('span');
-                                    return span ? span.textContent.trim() : '';
-                                }
-                            """)
-                            print(f'   [COMBOBOX] Button text: "{button_text}"')
-                            # Common placeholder texts that indicate empty field
-                            placeholder_texts = ['select', 'choose', 'please select', 'select title', 'select...', '...']
-                            if button_text:
-                                button_text_lower = button_text.lower()
-                                if any(ph in button_text_lower for ph in placeholder_texts):
-                                    print(f'   [COMBOBOX] Button shows placeholder text: "{button_text}" - Field is EMPTY')
-                                    return False
-                        except Exception as e:
-                            print(f'   [COMBOBOX] Error checking button text: {str(e)}')
-                            pass
-                        
-                        # Second check: find the hidden select element and check its value
-                        field_name = field_info.get('name', '')
-                        field_id = field_info.get('id', '')
-                        print(f'   [COMBOBOX] Field name from info: "{field_name}", Field ID: "{field_id}"')
-                        
-                        # Try to find select in parent container first
-                        try:
-                            hidden_select_value = await self.page.evaluate("""
-                                (button) => {
-                                    // Find select element in the same container as the button
-                                    const container = button.closest('div');
-                                    if (container) {
-                                        const select = container.querySelector('select');
-                                        if (select) {
-                                            return select.value || '';
-                                        }
-                                    }
-                                    return '';
-                                }
-                            """, await locator.element_handle())
-                            
-                            print(f'   [COMBOBOX] Select value from container: "{hidden_select_value}"')
-                            if hidden_select_value and hidden_select_value.strip() != '' and hidden_select_value != '0':
-                                print(f'   [COMBOBOX] Field is FILLED with value: "{hidden_select_value}"')
-                                return True
-                        except Exception as e:
-                            print(f'   [COMBOBOX] Error checking container select: {str(e)}')
-                            pass
-                        
-                        # Fallback: try by name if we have it
-                        if field_name:
-                            print(f'   [COMBOBOX] Trying to find select by name: "{field_name}"')
-                            try:
-                                hidden_select_value = await self.page.evaluate("""
-                                    (fieldName) => {
-                                        // Find select element with this name (usually hidden)
-                                        const select = document.querySelector('select[name="' + fieldName + '"]');
-                                        if (select) {
-                                            return select.value || '';
-                                        }
-                                        return '';
-                                    }
-                                """, field_name)
-                                
-                                print(f'   [COMBOBOX] Select value by name: "{hidden_select_value}"')
-                                if hidden_select_value and hidden_select_value.strip() != '' and hidden_select_value != '0':
-                                    print(f'   [COMBOBOX] Field is FILLED with value: "{hidden_select_value}"')
-                                    return True
-                            except Exception as e:
-                                print(f'   [COMBOBOX] Error checking select by name: {str(e)}')
-                                pass
-                            
-                            # Also try using locator
-                            try:
-                                select_locator = self.page.locator(f'select[name="{field_name}"]').first
-                                count = await select_locator.count()
-                                print(f'   [COMBOBOX] Found {count} select element(s) by name')
-                                if count > 0:
-                                    selected_value = await select_locator.input_value()
-                                    print(f'   [COMBOBOX] Select value from locator: "{selected_value}"')
-                                    if selected_value and selected_value.strip() != '' and selected_value != '0':
-                                        print(f'   [COMBOBOX] Field is FILLED with value: "{selected_value}"')
-                                        return True
-                            except Exception as e:
-                                print(f'   [COMBOBOX] Error using locator: {str(e)}')
-                                pass
-                        else:
-                            print(f'   [COMBOBOX] No field name available, cannot find select by name')
-                        
-                        # If we couldn't find a value, assume it's empty
-                        print(f'   [COMBOBOX] Field is EMPTY (no value found)')
-                        return False
-                    else:
-                        # Regular select element
-                        selected_value = await locator.input_value()
-                        return selected_value and selected_value.strip() != '' and selected_value != '0'
+                    selected_value = await locator.input_value()
+                    return selected_value and selected_value.strip() != '' and selected_value != '0'
                 except Exception:
                     return False
             
@@ -1179,24 +540,11 @@ class FormFiller:
     async def _get_field_options(self, locator, field_type: str) -> List[Dict[str, str]]:
         """
         Get available options for select or radio fields
-        For custom select, also get options from div.form__selectbox-option
         """
         options = []
         try:
             if field_type == 'select':
-                # Check if this is a custom select
-                try:
-                    tag_name = await locator.evaluate("el => el.tagName.toLowerCase()")
-                    input_type = await locator.get_attribute('type')
-                    data_placeholder = await locator.get_attribute('data-placeholder')
-                    
-                    if tag_name == 'input' and input_type == 'text' and data_placeholder:
-                        # For custom select, get options from both select and div
-                        options = await SelectFieldFiller._get_available_options(locator)
-                    else:
-                        options = await SelectFieldFiller._get_available_options(locator)
-                except Exception:
-                    options = await SelectFieldFiller._get_available_options(locator)
+                options = await SelectFieldFiller._get_available_options(locator)
             elif field_type == 'radio':
                 # Get all radio buttons with the same name
                 name = await locator.get_attribute('name')
@@ -1634,16 +982,11 @@ class FormFiller:
         selectors = []
         if field_type == 'select':
             # For select fields, use select-specific selectors
-            # Also handle custom select (input text with hidden select)
             if field_info.get('id'):
                 selectors.append(f'select#{field_info["id"]}')
-                # For custom select, also try input with same id
-                selectors.append(f'input#{field_info["id"]}')
                 selectors.append(f'#{field_info["id"]}')  # Fallback
             if field_info.get('name'):
                 selectors.append(f'select[name="{field_info["name"]}"]')
-                # For custom select, also try input with same name
-                selectors.append(f'input[name="{field_info["name"]}"]')
                 selectors.append(f'[name="{field_info["name"]}"]')  # Fallback
         elif field_type == 'file':
             # For file inputs, use file-specific selectors
@@ -1699,112 +1042,19 @@ class FormFiller:
         questions = self.config.get('questions', {})
         talent_pool = self.config.get('talent_pool', {})
         
-        # Get all form fields sorted by position (with retries)
-        print('\n[INFO] Starting to find form fields...')
-        fields = []
-        max_attempts = 5
-        
-        for attempt in range(1, max_attempts + 1):
-            print(f'[INFO] Attempt {attempt}/{max_attempts} to find form fields...')
-            fields = await self._get_form_fields_in_order()
-            
-            if len(fields) > 0:
-                print(f'[OK] Found {len(fields)} form fields on attempt {attempt}')
-                break
-            else:
-                if attempt < max_attempts:
-                    wait_time = 3000 * attempt  # Increasing wait time: 3s, 6s, 9s, 12s
-                    print(f'[WARNING] No form fields found, waiting {wait_time/1000} seconds before retry...')
-                    await self.page.wait_for_timeout(wait_time)
-                else:
-                    print(f'[WARNING] No form fields found after {max_attempts} attempts')
-        
-        # Check if important fields are found (indicating a form worth filling)
-        important_field_keywords = ['vorname', 'nachname', 'firstname', 'lastname', 'first name', 'last name', 
-                                    'given name', 'family name', 'email', 'e-mail', 'telefon', 'phone']
-        found_important_fields = False
-        
-        # fields is a list of Locator objects from _get_form_fields_in_order
-        # We need to get field info to check for important fields
-        for field in fields:
-            try:
-                # Get field info from locator
-                field_info = await self._get_field_info(field)
-                field_label = (field_info.get('label') or '').lower()
-                field_name = (field_info.get('name') or '').lower()
-                field_id = (field_info.get('id') or '').lower()
-                
-                for keyword in important_field_keywords:
-                    if keyword in field_label or keyword in field_name or keyword in field_id:
-                        found_important_fields = True
-                        print(f'[INFO] Found important field indicating a form: "{field_info.get("label") or field_info.get("name") or field_info.get("id")}"')
-                        break
-                
-                if found_important_fields:
-                    break
-            except Exception as e:
-                # Skip if we can't get field info
-                print(f'[WARNING] Could not get field info for important field check: {str(e)}')
-                continue
-        
-        # If important fields found, scroll through all sections and rescan
-        if found_important_fields:
-            print(f'\n[INFO] Important fields detected! Scrolling through all sections to find all fields...')
-            try:
-                # Scroll to top
-                await self.page.evaluate("window.scrollTo(0, 0)")
-                await self.page.wait_for_timeout(1000)
-                
-                # Scroll through the page in steps to load all sections
-                page_height = await self.page.evaluate("document.body.scrollHeight")
-                viewport_height = await self.page.evaluate("window.innerHeight")
-                scroll_steps = max(3, int(page_height / viewport_height) + 1)
-                
-                print(f'[INFO] Page height: {page_height}px, Viewport: {viewport_height}px, Scroll steps: {scroll_steps}')
-                
-                for step in range(scroll_steps + 1):
-                    scroll_position = int((step / scroll_steps) * page_height) if scroll_steps > 0 else 0
-                    await self.page.evaluate(f"window.scrollTo(0, {scroll_position})")
-                    await self.page.wait_for_timeout(500)  # Wait for content to load
-                    
-                    # Check for lazy-loaded content
-                    if step < scroll_steps:
-                        await self.page.wait_for_timeout(300)
-                
-                # Scroll back to top
-                await self.page.evaluate("window.scrollTo(0, 0)")
-                await self.page.wait_for_timeout(1000)
-                
-                # Rescan for fields after scrolling
-                print(f'[INFO] Rescanning for fields after scrolling...')
-                fields_after_scroll = await self._get_form_fields_in_order()
-                
-                if len(fields_after_scroll) > len(fields):
-                    print(f'[OK] Found {len(fields_after_scroll)} fields after scrolling (was {len(fields)})')
-                    fields = fields_after_scroll
-                else:
-                    print(f'[INFO] Same number of fields after scrolling ({len(fields_after_scroll)})')
-            except Exception as e:
-                print(f'[WARNING] Error during scroll and rescan: {str(e)}')
-        
-        print(f'\n[OK] Found {len(fields)} form fields. Processing in order...\n')
-        
-        # Set flag to ensure form is filled if important fields are found
-        should_fill_form = found_important_fields
-        if should_fill_form:
-            print(f'[INFO] Important fields detected - will fill this form completely\n')
+        # Get all form fields sorted by position
+        fields = await self._get_form_fields_in_order()
+        print(f'\nFound {len(fields)} form fields. Processing in order...\n')
         
         processed_field_names: Set[str] = set()
         
         # Process fields
         for idx, field in enumerate(fields, 1):
-            print(f'\n[FIELD {idx}] Processing field {idx}/{len(fields)}...')
             field_info = await self._get_field_info(field)
             field_label = field_info.get('label') or field_info.get('name') or field_info.get('id') or 'Unknown'
             field_type = field_info.get('type') or 'unknown'
             field_name = field_info.get('name') or ''
             field_id = field_info.get('id') or ''
-            print(f'[FIELD {idx}] Field info: label="{field_label}", type="{field_type}", name="{field_name}", id="{field_id}"')
             
             # Check if field was already processed (but allow file inputs to be processed even if "processed" - they might need retry)
             field_key = f"{field_name}_{field_id}_{field_type}"
@@ -1817,90 +1067,9 @@ class FormFiller:
                     continue
             
             # Check if field is already filled (but for file inputs, be less strict - they might appear filled but not actually be)
-            # For select fields, be extra careful and double-check
             is_already_filled = await self._is_field_filled(field, field_info)
-            
-            # Double-check for select fields (especially combobox)
-            if field_type == 'select' and is_already_filled:
-                print(f'[INFO] Field: "{field_label}" ({field_type}) - First check says filled, doing double-check...')
-                print(f'   [DEBUG] Field name: "{field_name}", Field ID: "{field_id}"')
-                
-                # Double-check by directly finding the select element
-                try:
-                    # Try to find select element directly
-                    select_value = None
-                    if field_name:
-                        # Try to get value directly from select element
-                        select_value = await self.page.evaluate("""
-                            (fieldName) => {
-                                const select = document.querySelector('select[name="' + fieldName + '"]');
-                                if (select) {
-                                    return select.value || '';
-                                }
-                                return '';
-                            }
-                        """, field_name)
-                        print(f'   [DOUBLE-CHECK] Direct select value by name: "{select_value}"')
-                    
-                    # Also check button text if it's a combobox, or input text if it's custom select
-                    try:
-                        tag_name = await field.evaluate("el => el.tagName.toLowerCase()")
-                        role = await field.get_attribute('role')
-                        input_type = await field.get_attribute('type')
-                        data_placeholder = await field.get_attribute('data-placeholder')
-                        
-                        # Check for custom select: input text with data-placeholder
-                        if tag_name == 'input' and input_type == 'text' and data_placeholder:
-                            print(f'   [DOUBLE-CHECK] Custom select detected, checking hidden select...')
-                            custom_select_value = await self.page.evaluate("""
-                                (input) => {
-                                    const container = input.closest('div');
-                                    if (container) {
-                                        const select = container.querySelector('select.form--hidden, select[class*="hidden"]');
-                                        if (select) {
-                                            return select.value || '';
-                                        }
-                                    }
-                                    return '';
-                                }
-                            """, await field.element_handle())
-                            print(f'   [DOUBLE-CHECK] Custom select value: "{custom_select_value}"')
-                            if not custom_select_value or custom_select_value == '' or custom_select_value == '0':
-                                print(f'   [DOUBLE-CHECK] Custom select is EMPTY, overriding first check!')
-                                is_already_filled = False
-                        
-                        # Check for combobox button
-                        elif tag_name == 'button' and role == 'combobox':
-                            button_text = await field.evaluate("""
-                                (button) => {
-                                    const span = button.querySelector('span');
-                                    return span ? span.textContent.trim() : '';
-                                }
-                            """)
-                            print(f'   [DOUBLE-CHECK] Combobox button text: "{button_text}"')
-                            
-                            # If button shows placeholder, it's definitely empty
-                            placeholder_texts = ['select', 'choose', 'please select', 'select title', 'select...', '...']
-                            if button_text:
-                                button_text_lower = button_text.lower()
-                                if any(ph in button_text_lower for ph in placeholder_texts):
-                                    print(f'   [DOUBLE-CHECK] Button shows placeholder - Field is EMPTY, overriding first check!')
-                                    is_already_filled = False
-                    except Exception as e:
-                        print(f'   [DOUBLE-CHECK] Error checking field: {str(e)}')
-                    
-                    # If select value is empty, override
-                    if select_value is None or select_value == '' or select_value == '0':
-                        print(f'   [DOUBLE-CHECK] Select value is empty - Field is EMPTY, overriding first check!')
-                        is_already_filled = False
-                    else:
-                        print(f'   [DOUBLE-CHECK] Select has value "{select_value}" - Field is FILLED')
-                except Exception as e:
-                    print(f'   [DOUBLE-CHECK] Error in double-check: {str(e)}')
-            
             if is_already_filled and field_type != 'file':
                 print(f'[SKIP] Field: "{field_label}" ({field_type}) - Already filled, skipping')
-                print(f'   [DEBUG] Field name: "{field_name}", Field ID: "{field_id}"')
                 # Mark as processed
                 if field_name:
                     processed_field_names.add(field_name)
@@ -1909,15 +1078,6 @@ class FormFiller:
                 continue
             
             config_value = self._get_config_value_for_field(field_info, personal_info, file_paths, questions, talent_pool)
-            
-            # If important fields found and no config value, still ask user (don't skip)
-            if should_fill_form and (config_value is None or config_value == ''):
-                print(f'[INFO] Field: "{field_label}" ({field_type}) - Important form detected, will ask user for value if needed')
-            
-            # For select fields that are empty, always ask user if no config value (don't skip)
-            if field_type == 'select' and not is_already_filled and (config_value is None or config_value == ''):
-                print(f'[INFO] Field: "{field_label}" ({field_type}) - Select field is empty and no config value found')
-                # Will ask user below
             
             # Handle talent pool checkbox
             if field_info.get('type') == 'checkbox' and (field_info.get('name') == 'app_register' or field_info.get('id') == 'app_register_btn'):
@@ -1986,12 +1146,7 @@ class FormFiller:
                     else:
                         print(f'[WARNING] Failed to fill field "{field_label}"')
                 else:
-                    # If important form detected, don't skip - ask user again or mark as required
-                    if should_fill_form:
-                        print(f'[WARNING] Field: "{field_label}" ({field_type}) - Important form detected but no value provided. Field may be required.')
-                        # Still mark as processed to avoid infinite loop, but log warning
-                    else:
-                        print(f'[SKIP] Field: "{field_label}" ({field_type}) - No value provided, skipping')
+                    print(f'[SKIP] Field: "{field_label}" ({field_type}) - No value provided, skipping')
                     # Mark as processed even if skipped to avoid asking again
                     if field_info.get('name'):
                         processed_field_names.add(field_info['name'])
@@ -2000,111 +1155,6 @@ class FormFiller:
         
         # Check all visible checkboxes
         await self._check_all_checkboxes(processed_field_names)
-        
-        # Final scan: Scroll through page and check for any missed fields
-        print('\n[INFO] Performing final scan to find any missed fields...')
-        max_rescan_attempts = 3
-        rescan_count = 0
-        
-        for rescan_attempt in range(1, max_rescan_attempts + 1):
-            print(f'\n[INFO] Rescan attempt {rescan_attempt}/{max_rescan_attempts}...')
-            
-            # Scroll through the page to ensure all fields are visible
-            try:
-                await self.page.evaluate("window.scrollTo(0, 0)")
-                await self.page.wait_for_timeout(500)
-                
-                page_height = await self.page.evaluate("document.body.scrollHeight")
-                viewport_height = await self.page.evaluate("window.innerHeight")
-                scroll_steps = max(3, int(page_height / viewport_height) + 1)
-                
-                for step in range(scroll_steps + 1):
-                    scroll_position = int((step / scroll_steps) * page_height) if scroll_steps > 0 else 0
-                    await self.page.evaluate(f"window.scrollTo(0, {scroll_position})")
-                    await self.page.wait_for_timeout(400)
-                
-                await self.page.evaluate("window.scrollTo(0, 0)")
-                await self.page.wait_for_timeout(500)
-            except Exception as e:
-                print(f'[WARNING] Error during rescan scroll: {str(e)}')
-            
-            # Rescan for fields
-            new_fields = await self._get_form_fields_in_order()
-            print(f'[INFO] Found {len(new_fields)} fields in rescan')
-            
-            if len(new_fields) == 0:
-                print(f'[INFO] No fields found in rescan, stopping')
-                break
-            
-            # Process new fields that weren't processed before
-            new_fields_processed = 0
-            for field in new_fields:
-                try:
-                    field_info = await self._get_field_info(field)
-                    field_label = field_info.get('label') or field_info.get('name') or field_info.get('id') or 'Unknown'
-                    field_type = field_info.get('type') or 'unknown'
-                    field_name = field_info.get('name') or ''
-                    field_id = field_info.get('id') or ''
-                    
-                    # Check if already processed
-                    if field_name and field_name in processed_field_names:
-                        continue
-                    if field_id and field_id in processed_field_names:
-                        continue
-                    
-                    # Check if already filled
-                    is_already_filled = await self._is_field_filled(field, field_info)
-                    if is_already_filled and field_type != 'file':
-                        print(f'[SKIP] Rescan field: "{field_label}" ({field_type}) - Already filled')
-                        if field_name:
-                            processed_field_names.add(field_name)
-                        if field_id:
-                            processed_field_names.add(field_id)
-                        continue
-                    
-                    # Try to get value from config
-                    config_value = self._get_config_value_for_field(field_info, personal_info, file_paths, questions, talent_pool)
-                    
-                    if config_value is not None and config_value != '':
-                        print(f'[OK] Rescan field: "{field_label}" ({field_type}) - Value in config: "{config_value}"')
-                        await self._fill_field_by_info(field, field_info, config_value)
-                        if field_name:
-                            processed_field_names.add(field_name)
-                        if field_id:
-                            processed_field_names.add(field_id)
-                        new_fields_processed += 1
-                    else:
-                        # Ask user for value
-                        user_value = await self._ask_user_for_value(field_info, field)
-                        if user_value is not None and user_value != '':
-                            print(f'[OK] Rescan field: "{field_label}" ({field_type}) - Using user-provided value: "{user_value}"')
-                            success = await self._fill_field_by_info(field, field_info, user_value)
-                            if success:
-                                await self.page.wait_for_timeout(300)
-                                if field_name:
-                                    processed_field_names.add(field_name)
-                                if field_id:
-                                    processed_field_names.add(field_id)
-                                new_fields_processed += 1
-                        else:
-                            # Mark as processed even if skipped
-                            if field_name:
-                                processed_field_names.add(field_name)
-                            if field_id:
-                                processed_field_names.add(field_id)
-                except Exception as e:
-                    print(f'[WARNING] Error processing rescan field: {str(e)}')
-                    continue
-            
-            if new_fields_processed == 0:
-                print(f'[INFO] No new fields processed in rescan attempt {rescan_attempt}, stopping')
-                break
-            else:
-                print(f'[OK] Processed {new_fields_processed} new field(s) in rescan attempt {rescan_attempt}')
-                rescan_count += new_fields_processed
-        
-        if rescan_count > 0:
-            print(f'\n[OK] Found and processed {rescan_count} additional field(s) in rescan')
         
         print('\n[OK] All fields processed')
     
@@ -2793,40 +1843,13 @@ class FormFiller:
                                 });
                             }
                         } else {
-                            // Try other field types - also check for combobox buttons
-                            field = fieldContainer.querySelector('input, select, textarea, button[role="combobox"]');
+                            // Try other field types
+                            field = fieldContainer.querySelector('input, select, textarea');
                             if (field) {
                                 fieldName = field.name || '';
                                 fieldId = field.id || '';
                                 fieldType = field.type || field.tagName.toLowerCase();
-                                
-                                // If it's a combobox button, find the hidden select element
-                                if (fieldType === 'button' && field.getAttribute('role') === 'combobox') {
-                                    const hiddenSelect = fieldContainer.querySelector('select');
-                                    if (hiddenSelect) {
-                                        fieldName = hiddenSelect.name || '';
-                                        fieldId = hiddenSelect.id || '';
-                                        fieldType = 'select';
-                                        console.log(`  Found combobox (select) field: name="${fieldName}", id="${fieldId}"`);
-                                    } else {
-                                        // Try to find select by name pattern
-                                        const allSelects = document.querySelectorAll('select');
-                                        for (const select of allSelects) {
-                                            const selectRect = select.getBoundingClientRect();
-                                            const buttonRect = field.getBoundingClientRect();
-                                            if (Math.abs(selectRect.top - buttonRect.top) < 100 &&
-                                                Math.abs(selectRect.left - buttonRect.left) < 100) {
-                                                fieldName = select.name || '';
-                                                fieldId = select.id || '';
-                                                fieldType = 'select';
-                                                console.log(`  Found combobox (select) field nearby: name="${fieldName}", id="${fieldId}"`);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    console.log(`  Found ${fieldType} field: name="${fieldName}", id="${fieldId}"`);
-                                }
+                                console.log(`  Found ${fieldType} field: name="${fieldName}", id="${fieldId}"`);
                                 
                                 errors.push({
                                     errorText: errorText,
@@ -3009,82 +2032,26 @@ class FormFiller:
                         
                         # For radio buttons, always use name selector (more reliable)
                         if field_type == 'radio' and field_name:
-                            # Escape special characters in name for CSS selector
-                            # Use attribute selector which handles special characters like [ and ]
                             print(f'   [RADIO] Trying radio buttons by name: input[type="radio"][name="{field_name}"]')
-                            try:
-                                field_locator = self.page.locator(f'input[type="radio"][name="{field_name}"]').first
-                                count = await field_locator.count()
-                                print(f'   [RADIO] Found {count} radio button(s) with this name')
-                            except Exception as e:
-                                print(f'   [RADIO] Error with selector, trying alternative method: {str(e)}')
-                                # Try alternative: find by name attribute using evaluate
-                                field_locator = None
-                                radios = await self.page.evaluate(f"""
-                                    () => {{
-                                        const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
-                                        const matching = radios.filter(r => r.name === {repr(field_name)});
-                                        return matching.length > 0;
-                                    }}
-                                """)
-                                if radios:
-                                    # Create a locator using a different approach
-                                    field_locator = self.page.locator(f'input[type="radio"]').filter(lambda el: el.get_attribute('name') == field_name).first
-                                    count = await field_locator.count()
-                                    print(f'   [RADIO] Found {count} radio button(s) with alternative method')
-                                else:
-                                    print(f'   [RADIO] No radio buttons found with name="{field_name}"')
-                                    field_locator = None
+                            field_locator = self.page.locator(f'input[type="radio"][name="{field_name}"]').first
+                            count = await field_locator.count()
+                            print(f'   [RADIO] Found {count} radio button(s) with this name')
                         elif field_id and field_type != 'radio':
                             # For non-radio fields, try ID first (but use attribute selector for special chars)
-                            # For select fields, prioritize select element
-                            if field_type == 'select':
-                                print(f'   [ID] Trying select by ID: select#{field_id}')
-                                try:
-                                    field_locator = self.page.locator(f'select#{field_id}').first
-                                    count = await field_locator.count()
-                                    print(f'   [ID] Found {count} select element(s) with this ID')
-                                except Exception as e:
-                                    print(f'   [ID] Error with select selector: {str(e)}')
-                                    # Fallback to generic ID selector
-                                    try:
-                                        field_locator = self.page.locator(f'[id="{field_id}"]').first
-                                        count = await field_locator.count()
-                                        print(f'   [ID] Found {count} element(s) with this ID (fallback)')
-                                    except Exception:
-                                        field_locator = None
-                            else:
-                                print(f'   Trying by ID: [id="{field_id}"]')
-                                try:
-                                    field_locator = self.page.locator(f'[id="{field_id}"]').first
-                                    count = await field_locator.count()
-                                    print(f'   Found {count} element(s) by ID')
-                                except Exception as e:
-                                    print(f'   [WARNING] Error with ID selector: {str(e)}')
-                                    field_locator = None
+                            print(f'   Trying by ID: [id="{field_id}"]')
+                            try:
+                                field_locator = self.page.locator(f'[id="{field_id}"]').first
+                                count = await field_locator.count()
+                                print(f'   Found {count} element(s) by ID')
+                            except Exception as e:
+                                print(f'   [WARNING] Error with ID selector: {str(e)}')
+                                field_locator = None
                         elif field_name:
                             # For other fields, use name selector
-                            # For select fields, prioritize select element
-                            if field_type == 'select':
-                                print(f'   [NAME] Trying select by name: select[name="{field_name}"]')
-                                try:
-                                    field_locator = self.page.locator(f'select[name="{field_name}"]').first
-                                    count = await field_locator.count()
-                                    print(f'   [NAME] Found {count} select element(s) with this name')
-                                except Exception as e:
-                                    print(f'   [NAME] Error with select selector: {str(e)}')
-                                    # Fallback to generic name selector
-                                    try:
-                                        field_locator = self.page.locator(f'[name="{field_name}"]').first
-                                        count = await field_locator.count()
-                                        print(f'   [NAME] Found {count} element(s) with this name (fallback)')
-                                    except Exception:
-                                        field_locator = None
-                            else:
-                                print(f'   Trying by name: [name="{field_name}"]')
-                                field_locator = self.page.locator(f'[name="{field_name}"]').first
-                                count = await field_locator.count()
-                                print(f'   Found {count} element(s) by name')
+                            print(f'   Trying by name: [name="{field_name}"]')
+                            field_locator = self.page.locator(f'[name="{field_name}"]').first
+                            count = await field_locator.count()
+                            print(f'   Found {count} element(s) by name')
                         
                         # Check if locator is valid and has elements
                         locator_valid = False

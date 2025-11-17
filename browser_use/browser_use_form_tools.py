@@ -172,6 +172,17 @@ async def fill_web_form(
         if action.auto_submit:
             await form_filler._submit_form()
             await page.wait_for_timeout(3000)
+            print('Form submitted')
+            
+            # Check for validation errors and try to fix them
+            print('\n[INFO] Checking for validation errors...')
+            fixed = await form_filler._smart_error_recovery()
+            if fixed:
+                print('[INFO] Errors were fixed, waiting before resubmitting...')
+                await page.wait_for_timeout(2000)
+                await form_filler._submit_form()
+                await page.wait_for_timeout(3000)
+                print('Form resubmitted after error recovery')
             
             # Check for success message or errors
             try:
