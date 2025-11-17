@@ -15,7 +15,21 @@ from modules.form_filler import FormFiller
 
 async def main():
     """Main function"""
-    url = 'https://www.empfehlungsbund.de/jobs/283194/solution-manager-w-strich-m-strich-x'
+    # url = 'https://www.empfehlungsbund.de/jobs/283194/solution-manager-w-strich-m-strich-x'
+    # url = 'https://www.finest-jobs.com/Bewerbung/Sales-Manager-D-Online-Marketing-727662?cp=BA'
+    # url = 'https://www.heckertsolar.com/vertriebsaussendienst-m-w-d-dtld.-suedost/sw10146#custom-form-anchor'
+    # url = 'https://jobs.mhphotels.com/stellenangebote/973236194/bewerbung'
+    # url = 'https://jobs.zalando.com/en/jobs/2722254-Abteilungsleiter-(all-genders)'
+    # url = 'https://abrams.onlyfy.jobs/application/en/apply/4jpwo636g52oi6c37jd81kz3ihkfs2'
+    # url = 'https://recruiting.ferchau.com/de/de/python-developer-385945?utm_source=jobexport.de'
+    # url = 'https://team-gmbh.jobs.personio.de/job/1439829?_pc=1778274#apply'
+    # url = 'https://jobs.b-ite.com/de/jobposting/6e53b54c453142d08d57e521aa9f872805c0fe270/apply'
+    # url = 'https://jobs.greenit.systems/jobportal/#!/job/(5252CE04-017E-0A5A-FBB6-1647B517F207)/apply/'
+    # url = 'https://itb-gmbh.onlyfy.jobs/application/en/apply/1vnrlm1be4hcs2ph8580a9h34ojgcm'
+    # url = 'https://karriere.mayser.com/de/jobposting/e78086b94f48b207ca65ddaafc5ac70d828add4e0/apply?ref=homepage'
+    # url = 'https://zinrec.intervieweb.it/zucchettidach/jobs/sales-manager-mwd-95461/de/?d=bfa'
+    # url = 'https://jobs.guidecom.de/jobportal/bauking/viewAusschreibung/2025-597.html'
+    url = 'https://itb-gmbh.onlyfy.jobs/application/en/apply/1vnrlm1be4hcs2ph8580a9h34ojgcm'
     config_path = 'config.json'
     
     print(f"Starting form filling for: {url}\n")
@@ -58,8 +72,29 @@ async def main():
                 await page.goto(url, wait_until='networkidle', timeout=120000)
             
             # Wait for page to load
-            print('Page loaded, waiting for content...')
+            print('Page loaded, waiting for content to fully load...')
             await page.wait_for_timeout(5000)
+            
+            # Wait for form elements to appear (with multiple attempts)
+            print('Waiting for form elements to appear...')
+            for attempt in range(1, 6):
+                try:
+                    form_fields_count = await page.evaluate("""
+                        () => {
+                            return document.querySelectorAll('input, select, textarea, [role="combobox"], [role="textbox"]').length;
+                        }
+                    """)
+                    print(f'   Attempt {attempt}/5: Found {form_fields_count} form elements')
+                    if form_fields_count > 0:
+                        print(f'   Form elements found! Waiting additional 3 seconds for dynamic content...')
+                        await page.wait_for_timeout(3000)
+                        break
+                    else:
+                        print(f'   No form elements found yet, waiting 3 seconds...')
+                        await page.wait_for_timeout(3000)
+                except Exception as e:
+                    print(f'   Error checking form elements: {str(e)}')
+                    await page.wait_for_timeout(2000)
             
             # Check if page loaded successfully
             current_url = page.url
@@ -129,9 +164,13 @@ async def main():
             # Wait for form to be visible
             if cookie_handled:
                 print('Waiting for form to load after cookie consent...')
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(5000)
                 await form_filler._handle_cookie_consent()
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(3000)
+            
+            # Additional wait for dynamic content and form rendering
+            print('Waiting for dynamic content and form rendering...')
+            await page.wait_for_timeout(5000)
             
             # Check for iframes
             iframes = await page.locator('iframe').all()
@@ -150,6 +189,10 @@ async def main():
                     except Exception:
                         pass
             
+            # Final wait before starting to fill form
+            print('Final wait before form filling...')
+            await page.wait_for_timeout(3000)
+            
             # Fill all form fields
             await form_filler.fill_all_fields()
             
@@ -165,12 +208,23 @@ async def main():
             # Wait for user input (optional)
             # input()  # Uncomment if you want to wait for user input
             
-            # Auto-submit (set to False to review manually)
-            auto_submit = False
+            # Auto-submit (set to True to automatically submit, False to review manually)
+            auto_submit = True
             if auto_submit:
+                print('\n[INFO] Auto-submit is enabled. Submitting form...')
                 await form_filler._submit_form()
                 await page.wait_for_timeout(3000)
-                print('Form submitted')
+                print('[OK] Form submitted')
+                
+                # Check for validation errors and try to fix them
+                print('\n[INFO] Checking for validation errors...')
+                fixed = await form_filler._smart_error_recovery()
+                if fixed:
+                    print('[INFO] Errors were fixed, waiting before resubmitting...')
+                    await page.wait_for_timeout(2000)
+                    await form_filler._submit_form()
+                    await page.wait_for_timeout(3000)
+                    print('[OK] Form resubmitted after error recovery')
             else:
                 print('Form not submitted automatically. Review and submit manually if needed.')
             

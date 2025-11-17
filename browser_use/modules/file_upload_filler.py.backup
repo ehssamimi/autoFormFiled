@@ -35,162 +35,7 @@ class FileUploadFiller:
         file_size = os.path.getsize(abs_path)
         print(f'✅ File exists, size: {file_size} bytes')
         
-        # Strategy 0: Direct search for input-group pattern with span _add
-        # Pattern: input[type="text"] with name -> find span with id = textInputId + "_add" -> find file input inside
-        print(f'\n🔍 [STRATEGY 0] Looking for input-group pattern with span _add...')
-        
-        # First, extract name from selectors
-        name = None
-        for selector in selectors:
-            try:
-                import re
-                name_match = re.search(r'name=["\']([^"\']+)["\']', selector)
-                if name_match:
-                    name = name_match.group(1)
-                    break
-            except Exception:
-                continue
-        
-        # If we have a name, try to find text input and then span
-        if name:
-            print(f'🔍 [STRATEGY 0] Looking for text input with name="{name}"...')
-            try:
-                # Try to find input[type="text"] with this name
-                text_input = page.locator(f'input[type="text"][name="{name}"]').first
-                if await text_input.count() > 0:
-                    text_input_id = await text_input.get_attribute('id')
-                    print(f'🔍 [STRATEGY 0] Found text input with name="{name}", id="{text_input_id}"')
-                    
-                    # Find span with id = textInputId + "_add"
-                    add_span_id = f'{text_input_id}_add'
-                    add_span = page.locator(f'span#{add_span_id}').first
-                    
-                    if await add_span.count() > 0:
-                        print(f'🔍 [STRATEGY 0] Found span#{add_span_id}, looking for file input inside...')
-                        try:
-                            # Find file input inside span
-                            file_input_in_span = add_span.locator('input[type="file"]').first
-                            
-                            if await file_input_in_span.count() > 0:
-                                print(f'✅ [STRATEGY 0] Found file input inside span#{add_span_id}, attempting upload...')
-                                # Scroll to span
-                                await add_span.scroll_into_view_if_needed()
-                                await page.wait_for_timeout(200)
-                                
-                                # Click the span first (this triggers the file input dialog)
-                                try:
-                                    await add_span.click(timeout=2000)
-                                    await page.wait_for_timeout(300)
-                                    print(f'🔍 [STRATEGY 0] Clicked span#{add_span_id}')
-                                except Exception as click_error:
-                                    print(f'⚠️  [STRATEGY 0] Error clicking span: {str(click_error)}')
-                                    # Try clicking via JavaScript
-                                    try:
-                                        await add_span.evaluate("""
-                                            (span) => {
-                                                span.click();
-                                            }
-                                        """)
-                                        await page.wait_for_timeout(300)
-                                        print(f'🔍 [STRATEGY 0] Clicked span via JavaScript')
-                                    except Exception:
-                                        pass
-                                
-                                # Set the file on the file input (NOT on text input!)
-                                try:
-                                    print(f'🔍 [STRATEGY 0] Setting file on file input...')
-                                    await file_input_in_span.set_input_files(abs_path, timeout=10000)
-                                    print(f'🔍 [STRATEGY 0] File set on file input')
-                                    
-                                    # Wait a bit for the file to be processed
-                                    await page.wait_for_timeout(500)
-                                    
-                                    # Trigger change event on file input
-                                    await file_input_in_span.evaluate("""
-                                        (input) => {
-                                            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                            input.dispatchEvent(changeEvent);
-                                            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-                                            input.dispatchEvent(inputEvent);
-                                        }
-                                    """)
-                                    
-                                    # Also trigger on span
-                                    await add_span.evaluate("""
-                                        (span) => {
-                                            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                            span.dispatchEvent(changeEvent);
-                                        }
-                                    """)
-                                    
-                                    # Trigger on text input if it exists (to update the display)
-                                    await text_input.evaluate("""
-                                        (input) => {
-                                            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                            input.dispatchEvent(changeEvent);
-                                        }
-                                    """)
-                                    
-                                    # Trigger on parent form if exists
-                                    try:
-                                        form = await add_span.evaluate_handle("""
-                                            (span) => {
-                                                let current = span;
-                                                for (let i = 0; i < 10 && current; i++) {
-                                                    if (current.tagName === 'FORM') {
-                                                        return current;
-                                                    }
-                                                    current = current.parentElement;
-                                                }
-                                                return null;
-                                            }
-                                        """)
-                                        if form:
-                                            await form.evaluate("""
-                                                (form) => {
-                                                    const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                                    form.dispatchEvent(changeEvent);
-                                                }
-                                            """)
-                                    except Exception:
-                                        pass
-                                    
-                                    print(f'✅ [STRATEGY 0] {field_name or "File"}: uploaded \'{os.path.basename(abs_path)}\' (via span _add click)')
-                                    await page.wait_for_timeout(2000)
-                                    
-                                    # Verify file was set on the FILE INPUT (not text input)
-                                    file_count = await file_input_in_span.evaluate("""
-                                        (input) => {
-                                            return input.files ? input.files.length : 0;
-                                        }
-                                    """)
-                                    
-                                    if file_count > 0:
-                                        file_name_uploaded = await file_input_in_span.evaluate("""
-                                            (input) => {
-                                                return input.files && input.files[0] ? input.files[0].name : '';
-                                            }
-                                        """)
-                                        print(f'✅ [STRATEGY 0] File verified on file input: count={file_count}, name="{file_name_uploaded}"')
-                                        return True
-                                    else:
-                                        print(f'⚠️  [STRATEGY 0] File was set but file count is 0 on file input')
-                                except Exception as set_error:
-                                    print(f'⚠️  [STRATEGY 0] Error setting file in span: {str(set_error)}')
-                                    import traceback
-                                    print(traceback.format_exc())
-                            else:
-                                print(f'⚠️  [STRATEGY 0] No file input found inside span#{add_span_id}')
-                        except Exception as span_error:
-                            print(f'⚠️  [STRATEGY 0] Error processing span: {str(span_error)}')
-                            import traceback
-                            print(traceback.format_exc())
-                    else:
-                        print(f'⚠️  [STRATEGY 0] No span found with id="{add_span_id}"')
-            except Exception as e:
-                print(f'⚠️  [STRATEGY 0] Error in strategy 0: {str(e)}')
-        
-        # Strategy 0.5: Try clicking span with _add suffix (for finest-jobs.com style)
+        # Strategy 0: Try clicking span with _add suffix FIRST (for finest-jobs.com style)
         for selector in selectors:
             try:
                 import re
@@ -203,78 +48,43 @@ class FileUploadFiller:
                     
                     # Find text input to get its id
                     text_input_id = field_id
-                    text_input = None
-                    
-                    # First, try to find text input by name (for input-group pattern)
-                    if name:
-                        # Try to find input[type="text"] with this name FIRST
-                        text_input = page.locator(f'input[type="text"][name="{name}"]').first
+                    if not text_input_id and name:
+                        text_input = page.locator(f'input[name="{name}"]').first
                         if await text_input.count() > 0:
                             text_input_id = await text_input.get_attribute('id')
-                            print(f'🔍 [STRATEGY 0] Found text input with name="{name}", id="{text_input_id}"')
-                        else:
-                            # Try any input with this name
-                            any_input = page.locator(f'input[name="{name}"]').first
-                            if await any_input.count() > 0:
-                                input_type = await any_input.get_attribute('type')
-                                if input_type == 'text':
-                                    text_input = any_input
-                                    text_input_id = await text_input.get_attribute('id')
-                                    print(f'🔍 [STRATEGY 0] Found text input with name="{name}", id="{text_input_id}"')
                     
-                    # If we have text_input_id, try to find span with _add suffix
                     if text_input_id:
                         # Find span with id = textInputId + "_add"
                         add_span_id = f'{text_input_id}_add'
                         add_span = page.locator(f'span#{add_span_id}').first
                         
                         if await add_span.count() > 0:
-                            print(f'🔍 [STRATEGY 0] Found span#{add_span_id}, looking for file input inside...')
                             try:
                                 # Find file input inside span
                                 file_input_in_span = add_span.locator('input[type="file"]').first
                                 
                                 if await file_input_in_span.count() > 0:
-                                    print(f'✅ [STRATEGY 0] Found file input inside span#{add_span_id}, attempting upload...')
+                                    print(f'🔍 Found span#{add_span_id} with file input, trying upload...')
                                     # Scroll to span
                                     await add_span.scroll_into_view_if_needed()
                                     await page.wait_for_timeout(200)
                                     
-                                    # Click the span first (this triggers the file input dialog)
+                                    # Click the span first
                                     try:
                                         await add_span.click(timeout=2000)
                                         await page.wait_for_timeout(300)
-                                        print(f'🔍 [STRATEGY 0] Clicked span#{add_span_id}')
-                                    except Exception as click_error:
-                                        print(f'⚠️  [STRATEGY 0] Error clicking span: {str(click_error)}')
-                                        # Try clicking via JavaScript
-                                        try:
-                                            await add_span.evaluate("""
-                                                (span) => {
-                                                    span.click();
-                                                }
-                                            """)
-                                            await page.wait_for_timeout(300)
-                                            print(f'🔍 [STRATEGY 0] Clicked span via JavaScript')
-                                        except Exception:
-                                            pass
+                                    except Exception:
+                                        pass
                                     
-                                    # Set the file on the file input (NOT on text input!)
+                                    # Set the file
                                     try:
-                                        print(f'🔍 [STRATEGY 0] Setting file on file input...')
                                         await file_input_in_span.set_input_files(abs_path, timeout=10000)
-                                        print(f'🔍 [STRATEGY 0] File set on file input')
                                         
-                                        # Wait a bit for the file to be processed
-                                        await page.wait_for_timeout(500)
-                                        
-                                        # Trigger change event on file input
+                                        # Trigger change event
                                         await file_input_in_span.evaluate("""
                                             (input) => {
                                                 const changeEvent = new Event('change', { bubbles: true, cancelable: true });
                                                 input.dispatchEvent(changeEvent);
-                                                const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-                                                input.dispatchEvent(inputEvent);
                                             }
                                         """)
                                         
@@ -286,43 +96,10 @@ class FileUploadFiller:
                                             }
                                         """)
                                         
-                                        # Trigger on text input if it exists (to update the display)
-                                        if text_input and await text_input.count() > 0:
-                                            await text_input.evaluate("""
-                                                (input) => {
-                                                    const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                                    input.dispatchEvent(changeEvent);
-                                                }
-                                            """)
-                                        
-                                        # Trigger on parent form if exists
-                                        try:
-                                            form = await add_span.evaluate_handle("""
-                                                (span) => {
-                                                    let current = span;
-                                                    for (let i = 0; i < 10 && current; i++) {
-                                                        if (current.tagName === 'FORM') {
-                                                            return current;
-                                                        }
-                                                        current = current.parentElement;
-                                                    }
-                                                    return null;
-                                                }
-                                            """)
-                                            if form:
-                                                await form.evaluate("""
-                                                    (form) => {
-                                                        const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                                        form.dispatchEvent(changeEvent);
-                                                    }
-                                                """)
-                                        except Exception:
-                                            pass
-                                        
-                                        print(f'✅ [STRATEGY 0] {field_name or "File"}: uploaded \'{os.path.basename(abs_path)}\' (via span _add click)')
+                                        print(f'✅ {field_name or "File"}: uploaded \'{os.path.basename(abs_path)}\' (via span _add click)')
                                         await page.wait_for_timeout(2000)
                                         
-                                        # Verify file was set on the FILE INPUT (not text input)
+                                        # Verify file was set
                                         file_count = await file_input_in_span.evaluate("""
                                             (input) => {
                                                 return input.files ? input.files.length : 0;
@@ -330,27 +107,11 @@ class FileUploadFiller:
                                         """)
                                         
                                         if file_count > 0:
-                                            file_name_uploaded = await file_input_in_span.evaluate("""
-                                                (input) => {
-                                                    return input.files && input.files[0] ? input.files[0].name : '';
-                                                }
-                                            """)
-                                            print(f'✅ [STRATEGY 0] File verified on file input: count={file_count}, name="{file_name_uploaded}"')
                                             return True
-                                        else:
-                                            print(f'⚠️  [STRATEGY 0] File was set but file count is 0 on file input')
                                     except Exception as set_error:
-                                        print(f'⚠️  [STRATEGY 0] Error setting file in span: {str(set_error)}')
-                                        import traceback
-                                        print(traceback.format_exc())
-                                else:
-                                    print(f'⚠️  [STRATEGY 0] No file input found inside span#{add_span_id}')
-                            except Exception as span_error:
-                                print(f'⚠️  [STRATEGY 0] Error processing span: {str(span_error)}')
-                                import traceback
-                                print(traceback.format_exc())
-                        else:
-                            print(f'⚠️  [STRATEGY 0] No span found with id="{add_span_id}"')
+                                        print(f'⚠️  Error setting file in span: {str(set_error)}')
+                            except Exception:
+                                pass
             except Exception:
                 continue
         
@@ -965,115 +726,8 @@ class FileUploadFiller:
         except Exception:
             pass
         
-        # Strategy 4: Try drag-and-drop zone (Dropzone.js library)
-        print(f'\n🔍 [STRATEGY 4] Looking for Dropzone elements...')
+        # Strategy 4: Try drag-and-drop zone
         try:
-            # First, try to find dropzone by id or name from selectors
-            dropzone_id = None
-            dropzone_name = None
-            
-            for selector in selectors:
-                try:
-                    import re
-                    id_match = re.search(r'#([\w-]+)', selector) or re.search(r'id=["\']([^"\']+)["\']', selector)
-                    name_match = re.search(r'name=["\']([^"\']+)["\']', selector)
-                    
-                    if id_match:
-                        dropzone_id = id_match.group(1)
-                        if 'dropzone' in dropzone_id.lower() or 'drop-zone' in dropzone_id.lower():
-                            print(f'🔍 [STRATEGY 4] Found dropzone id from selector: {dropzone_id}')
-                            break
-                    
-                    if name_match:
-                        dropzone_name = name_match.group(1)
-                except Exception:
-                    continue
-            
-            # Try specific dropzone by id first
-            if dropzone_id:
-                try:
-                    dropzone = page.locator(f'#{dropzone_id}').first
-                    if await dropzone.count() > 0:
-                        is_visible = await dropzone.is_visible()
-                        if is_visible:
-                            print(f'🔍 [STRATEGY 4] Found dropzone by id: #{dropzone_id}')
-                            
-                            # Find file input inside dropzone
-                            file_input = dropzone.locator('input[type="file"]').first
-                            if await file_input.count() > 0:
-                                print(f'🔍 [STRATEGY 4] Found file input inside dropzone, uploading...')
-                                
-                                # Scroll to dropzone
-                                await dropzone.scroll_into_view_if_needed()
-                                await page.wait_for_timeout(300)
-                                
-                                # Click on dropzone to activate it (some dropzones need this)
-                                try:
-                                    await dropzone.click(timeout=2000)
-                                    await page.wait_for_timeout(500)
-                                    print(f'🔍 [STRATEGY 4] Clicked dropzone to activate')
-                                except Exception:
-                                    pass
-                                
-                                # Set the file
-                                await file_input.set_input_files(abs_path, timeout=10000)
-                                await page.wait_for_timeout(1000)
-                                
-                                # Verify file was set
-                                file_count = await file_input.evaluate("""
-                                    (input) => {
-                                        return input.files ? input.files.length : 0;
-                                    }
-                                """)
-                                
-                                if file_count > 0:
-                                    file_name_uploaded = await file_input.evaluate("""
-                                        (input) => {
-                                            return input.files && input.files[0] ? input.files[0].name : '';
-                                        }
-                                    """)
-                                    
-                                    # Trigger Dropzone events
-                                    await dropzone.evaluate("""
-                                        (dropzone) => {
-                                            // Trigger Dropzone.js events if library is loaded
-                                            if (window.Dropzone && dropzone.dropzone) {
-                                                const dz = dropzone.dropzone;
-                                                const files = dz.hiddenFileInput.files;
-                                                if (files && files.length > 0) {
-                                                    // Manually trigger addedfile event
-                                                    dz.emit('addedfile', files[0]);
-                                                    dz.emit('complete', files[0]);
-                                                    dz.emit('success', files[0], 'success');
-                                                }
-                                            }
-                                            
-                                            // Also trigger standard events
-                                            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                            dropzone.dispatchEvent(changeEvent);
-                                        }
-                                    """)
-                                    
-                                    # Also trigger on file input
-                                    await file_input.evaluate("""
-                                        (input) => {
-                                            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                            input.dispatchEvent(changeEvent);
-                                            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-                                            input.dispatchEvent(inputEvent);
-                                        }
-                                    """)
-                                    
-                                    await page.wait_for_timeout(2000)
-                                    
-                                    print(f'✅ [STRATEGY 4] {field_name or "File"}: uploaded \'{os.path.basename(abs_path)}\' (Dropzone by id) - File count: {file_count}, File name: "{file_name_uploaded}"')
-                                    return True
-                                else:
-                                    print(f'⚠️  [STRATEGY 4] File was set but file count is 0')
-                except Exception as e:
-                    print(f'⚠️  [STRATEGY 4] Error with dropzone by id: {str(e)}')
-            
-            # Try generic dropzone selectors
             dropzone_selectors = [
                 '.dropzone',
                 '[class*="dropzone"]',
@@ -1090,86 +744,17 @@ class FileUploadFiller:
                     if await dropzone.count() > 0:
                         is_visible = await dropzone.is_visible()
                         if is_visible:
-                            print(f'🔍 [STRATEGY 4] Found dropzone with selector: {dropzone_selector}')
-                            
                             # Find hidden file input inside dropzone
                             file_input = dropzone.locator('input[type="file"]').first
                             if await file_input.count() > 0:
-                                print(f'🔍 [STRATEGY 4] Found file input inside dropzone, uploading...')
-                                
-                                # Scroll to dropzone
-                                await dropzone.scroll_into_view_if_needed()
-                                await page.wait_for_timeout(300)
-                                
-                                # Click on dropzone to activate it
-                                try:
-                                    await dropzone.click(timeout=2000)
-                                    await page.wait_for_timeout(500)
-                                    print(f'🔍 [STRATEGY 4] Clicked dropzone to activate')
-                                except Exception:
-                                    pass
-                                
-                                # Set the file
-                                await file_input.set_input_files(abs_path, timeout=10000)
-                                await page.wait_for_timeout(1000)
-                                
-                                # Verify file was set
-                                file_count = await file_input.evaluate("""
-                                    (input) => {
-                                        return input.files ? input.files.length : 0;
-                                    }
-                                """)
-                                
-                                if file_count > 0:
-                                    file_name_uploaded = await file_input.evaluate("""
-                                        (input) => {
-                                            return input.files && input.files[0] ? input.files[0].name : '';
-                                        }
-                                    """)
-                                    
-                                    # Trigger Dropzone events
-                                    await dropzone.evaluate("""
-                                        (dropzone) => {
-                                            // Trigger Dropzone.js events if library is loaded
-                                            if (window.Dropzone && dropzone.dropzone) {
-                                                const dz = dropzone.dropzone;
-                                                const files = dz.hiddenFileInput.files;
-                                                if (files && files.length > 0) {
-                                                    dz.emit('addedfile', files[0]);
-                                                    dz.emit('complete', files[0]);
-                                                    dz.emit('success', files[0], 'success');
-                                                }
-                                            }
-                                            
-                                            // Also trigger standard events
-                                            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                            dropzone.dispatchEvent(changeEvent);
-                                        }
-                                    """)
-                                    
-                                    # Also trigger on file input
-                                    await file_input.evaluate("""
-                                        (input) => {
-                                            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                                            input.dispatchEvent(changeEvent);
-                                            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-                                            input.dispatchEvent(inputEvent);
-                                        }
-                                    """)
-                                    
-                                    await page.wait_for_timeout(2000)
-                                    
-                                    print(f'✅ [STRATEGY 4] {field_name or "File"}: uploaded \'{os.path.basename(abs_path)}\' (Dropzone generic) - File count: {file_count}, File name: "{file_name_uploaded}"')
-                                    return True
-                                else:
-                                    print(f'⚠️  [STRATEGY 4] File was set but file count is 0')
-                except Exception as e:
-                    print(f'⚠️  [STRATEGY 4] Error with selector {dropzone_selector}: {str(e)}')
+                                await file_input.set_input_files(abs_path)
+                                print(f'✅ {field_name or "File"}: uploaded \'{os.path.basename(abs_path)}\' (drag-and-drop zone)')
+                                await page.wait_for_timeout(500)
+                                return True
+                except Exception:
                     continue
-        except Exception as e:
-            print(f'⚠️  [STRATEGY 4] Dropzone detection error: {str(e)}')
-            import traceback
-            print(traceback.format_exc())
+        except Exception:
+            pass
         
         print(f'⚠️  {field_name or "File upload field"} not found')
         return False
