@@ -1,8 +1,44 @@
 # Automated Web Form Filler
 
-A Node.js tool for automatically filling web forms using Playwright browser automation.
+A comprehensive web form automation tool with support for both **Node.js/JavaScript** and **Python** implementations. Automatically fills web forms using Playwright browser automation with intelligent field detection and handling.
 
-## Features
+## 🚀 Quick Start
+
+This project contains two implementations:
+
+### Python Implementation (Recommended)
+**Location**: `browser_use/` directory
+
+The Python version is the most advanced and feature-rich implementation. See [`browser_use/README.md`](./browser_use/README.md) for complete documentation.
+
+**Key Features:**
+- ✅ Intelligent field detection (standard and custom implementations)
+- ✅ Support for custom select boxes (bootstrap-select, bw-popover, combobox)
+- ✅ Full date picker interaction with calendar navigation
+- ✅ Dropzone.js file upload support
+- ✅ Multi-section form scanning
+- ✅ Error recovery and validation handling
+- ✅ Interactive mode for missing values
+- ✅ Smart value mapping for common fields
+
+**Quick Start:**
+```bash
+cd browser_use
+py -3 -m pip install playwright
+py -3 -m playwright install chromium
+py -3 run_form_fill.py
+```
+
+For detailed documentation, configuration, and advanced features, see: **[`browser_use/README.md`](./browser_use/README.md)**
+
+---
+
+### JavaScript/Node.js Implementation
+**Location**: Root directory
+
+A simpler JavaScript implementation using Node.js and Playwright.
+
+## Features (JavaScript Version)
 
 - ✅ Automatically fills text fields (name, email, phone, etc.)
 - ✅ Handles dropdown selections
@@ -13,7 +49,7 @@ A Node.js tool for automatically filling web forms using Playwright browser auto
 - ✅ Error handling and logging
 - ✅ Fast and efficient with modern JavaScript
 
-## Installation
+## Installation (JavaScript Version)
 
 ### Prerequisites
 
@@ -37,7 +73,7 @@ Or install all browsers:
 npx playwright install
 ```
 
-## Configuration
+## Configuration (JavaScript Version)
 
 Edit `config.json` to set your form data:
 
@@ -69,7 +105,7 @@ Edit `config.json` to set your form data:
 - `wait_timeout`: Time to wait after page load (milliseconds)
 - `screenshot_on_error`: Take screenshot when errors occur
 
-## Usage
+## Usage (JavaScript Version)
 
 ### Basic Usage
 
@@ -119,12 +155,42 @@ Example selectors:
 
 ```
 form_complete/
-├── formFiller.js       # Main script (JavaScript)
-├── package.json        # Node.js dependencies
-├── config.json         # Form data configuration
-├── README.md          # This file
-└── .gitignore         # Git ignore rules
+├── browser_use/              # Python implementation (RECOMMENDED)
+│   ├── README.md            # Complete Python documentation
+│   ├── run_form_fill.py     # Main Python script
+│   ├── config.json          # Python configuration
+│   └── modules/             # Python modules
+│       ├── form_filler.py
+│       ├── select_filler.py
+│       ├── date_picker_filler.py
+│       └── ...
+├── formFiller.js            # JavaScript implementation
+├── package.json             # Node.js dependencies
+├── config.json             # JavaScript configuration
+├── modules/                # JavaScript modules
+│   ├── FieldFiller.js
+│   ├── SelectFieldFiller.js
+│   └── ...
+└── README.md               # This file
 ```
+
+## Which Version Should I Use?
+
+### Use Python Version (`browser_use/`) if you need:
+- ✅ Support for custom select implementations (bootstrap-select, bw-popover, etc.)
+- ✅ Advanced date picker interaction
+- ✅ Dropzone.js file upload support
+- ✅ Multi-section form scanning
+- ✅ Error recovery after form submission
+- ✅ Interactive mode for missing values
+- ✅ Smart value mapping
+
+### Use JavaScript Version if you need:
+- ✅ Simple, straightforward form filling
+- ✅ Node.js ecosystem integration
+- ✅ Quick setup with npm
+
+**💡 Recommendation**: For most use cases, especially complex forms with custom implementations, use the **Python version** in `browser_use/` directory.
 
 ## Troubleshooting
 
@@ -150,19 +216,31 @@ If a field is not being filled:
 
 ### Module Not Found
 
-If you get "Cannot find module" errors:
+**JavaScript:**
 ```bash
 npm install
 ```
 
+**Python:**
+```bash
+cd browser_use
+py -3 -m pip install playwright
+py -3 -m playwright install chromium
+```
+
 ### Playwright Browser Not Found
 
-If you get browser-related errors:
+**JavaScript:**
 ```bash
 npx playwright install chromium
 ```
 
-## Advanced Usage
+**Python:**
+```bash
+py -3 -m playwright install chromium
+```
+
+## Advanced Usage (JavaScript Version)
 
 ### Programmatic Usage
 
@@ -221,6 +299,11 @@ await this._fillField(
 - Adjust `wait_timeout` based on page load speed
 - Use specific selectors instead of generic ones for better performance
 
+## Documentation
+
+- **Python Implementation**: See [`browser_use/README.md`](./browser_use/README.md) for complete documentation, advanced features, and configuration options.
+- **JavaScript Implementation**: See code comments in `formFiller.js` and module files.
+
 ## License
 
 This project is for educational and personal use only.
@@ -228,6 +311,7 @@ This project is for educational and personal use only.
 ## Support
 
 For issues or questions:
-1. Check the code comments in `formFiller.js`
-2. Modify selectors based on your specific form structure
-3. Check Playwright documentation: https://playwright.dev/
+1. **Python version**: Check [`browser_use/README.md`](./browser_use/README.md) for detailed documentation
+2. **JavaScript version**: Check the code comments in `formFiller.js`
+3. Modify selectors based on your specific form structure
+4. Check Playwright documentation: https://playwright.dev/
